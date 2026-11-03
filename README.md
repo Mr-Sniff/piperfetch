@@ -27,14 +27,51 @@ The dashboard sits at the top until you run a command. That means:
 
 ## Requirements
 
-- Python 3.11+
-- a terminal that supports `ESC 7` / `ESC 8` cursor save/restore; Kitty and
-  most modern terminals do
-- fish (the included shell integration is written for fish)
-- optional: `niri`, `lscpu`, `lspci`, `ip`, `gsettings` for the corresponding
-  information lines. Missing commands simply hide their module.
+- **Python 3.11+** (uses the standard-library `tomllib`; no pip packages)
+- a Linux/Unix terminal that supports `ESC 7` / `ESC 8` cursor save/restore;
+  Kitty is recommended
+- **fish** for the included shell integration (the animation stop/clear hooks)
+- optional: `niri`, `lscpu`, `lspci`, `ip`, `gsettings`, `kitty`, `fish` for
+  the corresponding information lines. Missing commands simply hide their
+  module.
 
-No third-party Python packages are used.
+There are **no third-party Python dependencies** and no build step.
+
+## Installation
+
+```bash
+git clone https://github.com/Mr-Sniff/piperfetch.git
+cd piperfetch
+
+# optional config
+mkdir -p ~/.config/piperfetch
+cp config.example.toml ~/.config/piperfetch/config.toml
+
+# fish hooks (stops the animation when a command starts)
+mkdir -p ~/.config/fish/conf.d
+cp fish/piperfetch.fish ~/.config/fish/conf.d/piperfetch.fish
+```
+
+Add the Ctrl-L binding to your `fish_user_key_bindings` function:
+
+```fish
+bind \cl __piperfetch_clear_screen
+```
+
+If your fish greeting runs another fetch, disable it:
+
+```fish
+function fish_greeting
+end
+```
+
+Then set Kitty to use piperfetch as its shell program:
+
+```conf
+shell /absolute/path/to/piperfetch
+```
+
+Restart Kitty or open a new window.
 
 ## Run it
 
@@ -115,7 +152,7 @@ The fish side needs the integration in `~/.config/fish/config.fish`:
 - a `clear` wrapper (and a Ctrl-L binding) kills the animation and clears the
   screen, so the dashboard disappears like a normal fetch logo.
 
-Those functions are installed in this machine's fish config already.
+The hooks are included in `fish/piperfetch.fish`; see Installation above.
 
 ## Layout
 
@@ -136,6 +173,7 @@ Those functions are installed in this machine's fish config already.
 
 - `piperfetch` — the whole program (stdlib only)
 - `config.example.toml` — configuration example
+- `fish/piperfetch.fish` — fish hooks
 - `demo.gif` — animated demo
 - `README.md` — this file
 
