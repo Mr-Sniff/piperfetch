@@ -5,17 +5,6 @@ A small, self-contained fastfetch-style terminal dashboard with a live
 
 ![piperfetch demo](demo.gif)
 
-```
-╭──────────────────────────────────────────────╮  user@host
-│       ╭──╮        │        ╭─╮              │  ---------
-│   │   │  ╰────────╯        │ ╰──────╮       │  OS: CachyOS
-│   ╰───╯                    ╰────────╯       │  Kernel: ...
-│                                              │  CPU: ...
-╰──────────────────────────────────────────────╯  ...
-~
-❯
-```
-
 The dashboard sits at the top until you run a command. That means:
 
 - the prompt is available immediately;
