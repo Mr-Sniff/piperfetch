@@ -1,0 +1,31 @@
+# Copy this to ~/.config/piperfetch/config.toml and edit as needed.
+
+# Show the system information block on the right.
+specs = true
+
+# Let the pipe box grow with the terminal.
+# When false, width/height are used (in character cells).
+autosize = true
+width = 54
+height = 22
+
+# Maximum pipe-box size in pixels (0 = no limit).
+max_width = 0
+max_height = 0
+
+# Horizontal placement when the box is narrower than the terminal:
+# "left", "center" or "right".
+align = "left"
+
+# Bold clock in the middle of the box; pipes are drawn behind it.
+clock = false
+# 1 = normal text, 2 = 3-row clock, 3 = 5-row large clock.
+clock_size = 1
+clock_format = "%H:%M:%S"
+
+# Pipe animation speed in frames per second (1-240).
+# Lower is slower; pipes.sh's default is 75, piperfetch's default is 38.
+fps = 38
+
+# Rows kept free below the box when specs are off and autosize is on.
+shell_rows = 8

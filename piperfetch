@@ -1,0 +1,1002 @@
+#!/usr/bin/env python3
+"""piperfetch - a small, self-contained fastfetch-like terminal dashboard.
+
+The top of the terminal is a fixed dashboard: live pipes on the left and
+system information on the right.  The shell runs below it, so the prompt is
+usable immediately.  The animation runs in a separate forked process and never
+reads stdin.
+
+This file intentionally uses only the Python standard library.
+"""
+
+from __future__ import annotations
+
+import getpass
+import fcntl
+import os
+import random
+import re
+import shutil
+import signal
+import socket
+import struct
+import subprocess
+import sys
+import termios
+import time
+import tomllib
+from pathlib import Path
+
+RESET = "\x1b[0m"
+BOLD = "\x1b[1m"
+TITLE = "\x1b[1;32m"
+KEY = "\x1b[1;36m"
+BORDER = "\x1b[1;37m"
+
+ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+PIPES = "│╭ ╮╯─╮  ╰│╯╰ ╭─"
+PIPE_COLORS = (1, 2, 3, 4, 5, 6, 7)  # no black
+DEFAULT_FPS = 38                     # pipes.sh default is 75
+GAP = 2
+CLOCK_COLOR = "\x1b[1;97m"
+
+CONFIG_DEFAULTS = {
+    "specs": True,
+    "autosize": True,
+    "width": 54,
+    "height": 22,
+    "max_width": 0,
+    "max_height": 0,
+    "align": "left",
+    "clock": False,
+    "clock_size": 1,
+    "clock_format": "%H:%M:%S",
+    "fps": DEFAULT_FPS,
+    "shell_rows": 8,
+}
+
+
+def config_path() -> Path:
+    base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    return base / "piperfetch" / "config.toml"
+
+
+def load_config() -> dict:
+    cfg = dict(CONFIG_DEFAULTS)
+    path = config_path()
+    try:
+        with path.open("rb") as handle:
+            data = tomllib.load(handle)
+    except (OSError, tomllib.TOMLDecodeError):
+        return cfg
+
+    for key in ("specs", "autosize", "clock"):
+        if isinstance(data.get(key), bool):
+            cfg[key] = data[key]
+    for key in ("width", "height"):
+        value = data.get(key)
+        if isinstance(value, int) and value > 0:
+            cfg[key] = value
+    for key in ("max_width", "max_height", "shell_rows"):
+        value = data.get(key)
+        if isinstance(value, int) and value >= 0:
+            cfg[key] = value
+    if isinstance(data.get("fps"), int) and 1 <= data["fps"] <= 240:
+        cfg["fps"] = data["fps"]
+    if isinstance(data.get("clock_size"), int) and 1 <= data["clock_size"] <= 3:
+        cfg["clock_size"] = data["clock_size"]
+    if isinstance(data.get("align"), str):
+        align = data["align"].lower()
+        if align in ("left", "center", "right"):
+            cfg["align"] = align
+    if isinstance(data.get("clock_format"), str) and data["clock_format"]:
+        cfg["clock_format"] = data["clock_format"]
+    return cfg
+
+
+def terminal_geometry() -> tuple[int, int, int, int]:
+    """Return columns, rows, pixel width, pixel height."""
+    cols = rows = xpix = ypix = 0
+    try:
+        data = fcntl.ioctl(1, termios.TIOCGWINSZ, b"\0" * 8)
+        rows, cols, xpix, ypix = struct.unpack("HHHH", data)
+    except OSError:
+        pass
+    if cols <= 0 or rows <= 0:
+        size = shutil.get_terminal_size(fallback=(120, 40))
+        cols, rows = size.columns, size.lines
+    return cols, rows, xpix, ypix
+
+
+def configured_limits(cfg: dict, cols: int, rows: int, xpix: int, ypix: int):
+    max_cols = cols
+    max_rows = rows
+    if cfg["max_width"] > 0 and cols > 0 and xpix > 0:
+        max_cols = max(1, int(cfg["max_width"] * cols / xpix))
+    if cfg["max_height"] > 0 and rows > 0 and ypix > 0:
+        max_rows = max(1, int(cfg["max_height"] * rows / ypix))
+    return max_cols, max_rows
+
+
+
+# ---------------------------------------------------------------------------
+# Small helpers
+# ---------------------------------------------------------------------------
+
+def visible_width(text: str) -> int:
+    return len(ANSI_RE.sub("", text))
+
+
+def run(cmd: list[str], timeout: float = 1.0) -> str:
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout, check=False
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return proc.stdout.strip()
+
+
+def module(key: str, value: str | None) -> str | None:
+    if value is None or value == "":
+        return None
+    return f"{KEY}{key}{RESET}: {value}"
+
+
+def human_bytes(size: float) -> str:
+    units = ("B", "KiB", "MiB", "GiB", "TiB", "PiB")
+    value = float(size)
+    for unit in units:
+        if value < 1024 or unit == units[-1]:
+            if unit == "B":
+                return f"{value:.0f} {unit}"
+            return f"{value:.2f} {unit}"
+        value /= 1024
+    return f"{value:.2f} PiB"
+
+
+def duration(seconds: float) -> str:
+    seconds = int(seconds)
+    if seconds < 60:
+        return f"{seconds} secs"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes} mins"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours} hours, {minutes} mins"
+
+
+def read_text(path: str) -> str:
+    try:
+        return Path(path).read_text(errors="replace")
+    except OSError:
+        return ""
+
+
+def os_release() -> str:
+    values: dict[str, str] = {}
+    for line in read_text("/etc/os-release").splitlines():
+        if "=" in line:
+            key, value = line.split("=", 1)
+            values[key] = value.strip().strip('"')
+    return values.get("PRETTY_NAME") or values.get("NAME") or "Linux"
+
+
+def uptime() -> str:
+    try:
+        seconds = float(read_text("/proc/uptime").split()[0])
+    except (IndexError, ValueError):
+        return ""
+    return duration(seconds)
+
+
+def package_count() -> str:
+    pacman = 0
+    pacman_dir = Path("/var/lib/pacman/local")
+    try:
+        pacman = sum(1 for p in pacman_dir.iterdir() if p.is_dir())
+    except OSError:
+        pass
+
+    flatpak = 0
+    for root in (Path.home() / ".local/share/flatpak/app", Path("/var/lib/flatpak/app")):
+        try:
+            flatpak += sum(1 for p in root.iterdir() if p.is_dir())
+        except OSError:
+            pass
+
+    parts = []
+    if flatpak:
+        parts.append(f"{flatpak} (flatpak)")
+    if pacman:
+        parts.append(f"{pacman} (pacman)")
+    return ", ".join(parts)
+
+
+def shell_name() -> str:
+    shell = Path(os.environ.get("SHELL", "sh")).name
+    version = ""
+    try:
+        out = run([shell, "--version"], timeout=0.5).splitlines()
+        if out:
+            match = re.search(r"(\d+\.\d+(?:\.\d+)?)", out[0])
+            if match:
+                version = f" {match.group(1)}"
+    except OSError:
+        pass
+    return f"{shell}{version}"
+
+
+def displays() -> list[tuple[str, str]]:
+    output = run(["niri", "msg", "outputs"], timeout=1.0)
+    if not output:
+        return []
+
+    lines = output.splitlines()
+    result: list[tuple[str, str]] = []
+    for index, line in enumerate(lines):
+        match = re.match(r'Output\s+".*"\s+\((DP-\d+|HDMI-\d+|eDP-\d+)\)', line)
+        if not match:
+            continue
+        connector = match.group(1)
+        mode = ""
+        for nxt in lines[index + 1:index + 8]:
+            found = re.search(r"Current mode:\s*(\d+x\d+)\s*@\s*([\d.]+)\s*Hz", nxt)
+            if found:
+                mode = f"{found.group(1)} @ {float(found.group(2)):.0f} Hz"
+                break
+        result.append((connector, mode))
+    return result
+
+
+def window_manager() -> str:
+    version = run(["niri", "msg", "version"], timeout=1.0)
+    match = re.search(r"Compositor version:\s*([^\s]+)", version)
+    if match:
+        return f"niri {match.group(1)} (Wayland)"
+    return ""
+
+
+def gsettings(schema: str, key: str) -> str:
+    value = run(["gsettings", "get", schema, key], timeout=0.8)
+    return value.strip().strip("'")
+
+
+def desktop_theme() -> str:
+    theme = gsettings("org.gnome.desktop.interface", "gtk-theme")
+    return f"{theme} [GTK3/4]" if theme else ""
+
+
+def desktop_font() -> str:
+    value = gsettings("org.gnome.desktop.interface", "font-name")
+    if not value:
+        return ""
+    parts = value.rsplit(" ", 1)
+    if len(parts) == 2 and re.match(r"[\d.]+$", parts[1]):
+        return f"{parts[0]} ({parts[1]}pt) [GTK3/4]"
+    return f"{value} [GTK3/4]"
+
+
+def desktop_cursor() -> str:
+    theme = gsettings("org.gnome.desktop.interface", "cursor-theme")
+    size = gsettings("org.gnome.desktop.interface", "cursor-size")
+    if not theme:
+        return ""
+    return f"{theme} ({size}px)" if size else theme
+
+
+def terminal_name() -> str:
+    if os.environ.get("KITTY_WINDOW_ID") or "kitty" in os.environ.get("TERM", ""):
+        version = run(["kitty", "--version"], timeout=0.5).splitlines()
+        if version:
+            return " ".join(version[0].split()[:2])
+        return "kitty"
+    return os.environ.get("TERM", "")
+
+
+def terminal_font() -> str:
+    conf = Path.home() / ".config/kitty/kitty.conf"
+    if not conf.exists():
+        return ""
+    family = ""
+    size = ""
+    try:
+        for line in conf.read_text(errors="replace").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split(None, 1)
+            if len(parts) != 2:
+                continue
+            if parts[0] == "font_family":
+                family = parts[1].strip()
+            elif parts[0] == "font_size":
+                size = parts[1].strip()
+    except OSError:
+        return ""
+    if not family:
+        return ""
+    return f"{family} ({size}pt)" if size else family
+
+
+def cpu_info() -> str:
+    lscpu = run(["lscpu"], timeout=1.0)
+    if not lscpu:
+        return ""
+
+    values: dict[str, str] = {}
+    for line in lscpu.splitlines():
+        if ":" in line:
+            key, value = line.split(":", 1)
+            values[key.strip()] = value.strip()
+
+    model = re.sub(r"\s+", " ", values.get("Model name", "")).strip()
+    if not model:
+        return ""
+    try:
+        threads = int(values.get("CPU(s)", "0"))
+    except ValueError:
+        threads = 0
+    try:
+        cores_per_socket = int(values.get("Core(s) per socket", "0"))
+        sockets = int(values.get("Socket(s)", "1"))
+        cores = cores_per_socket * sockets
+    except ValueError:
+        cores = 0
+
+    if cores and threads and cores != threads:
+        count = f"({cores}C/{threads}T)"
+    elif threads:
+        count = f"({threads})"
+    else:
+        count = ""
+
+    freq = ""
+    try:
+        mhz = float(values.get("CPU max MHz", "0"))
+        if mhz:
+            freq = f" @ {mhz / 1000:.2f} GHz"
+    except ValueError:
+        pass
+    if not freq:
+        try:
+            khz = int(read_text("/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq").strip())
+            if khz:
+                freq = f" @ {khz / 1_000_000:.2f} GHz"
+        except ValueError:
+            pass
+    return f"{model} {count}{freq}".strip()
+
+
+def gpu_info() -> list[str]:
+    output = run(["lspci"], timeout=1.0)
+    if not output:
+        return []
+
+    result: list[str] = []
+    for line in output.splitlines():
+        if not re.search(r"(VGA compatible controller|3D controller|Display controller)", line):
+            continue
+        name = line.split(": ", 1)[-1]
+        name = re.sub(r"\s*\[[0-9a-fA-F]{4}:[0-9a-fA-F]{4}\]", "", name)
+        name = re.sub(r"\s+", " ", name).strip()
+        if not name:
+            continue
+
+        vendor = (
+            "NVIDIA" if "NVIDIA" in name
+            else "Intel" if "Intel" in name
+            else "AMD" if ("AMD" in name or "ATI" in name)
+            else ""
+        )
+        if "NVIDIA" in name or "AMD" in name or "ATI" in name:
+            kind = "Discrete"
+        elif "Intel" in name:
+            kind = "Integrated"
+        else:
+            kind = "GPU"
+
+        bracket = re.search(r"\[([^\]]+)\]", name)
+        if bracket:
+            short = bracket.group(1).strip()
+            if vendor and not short.lower().startswith(vendor.lower()):
+                short = f"{vendor} {short}"
+            name = short
+        else:
+            name = re.sub(r"^(NVIDIA|Intel|AMD|ATI) Corporation\s+", "", name)
+            name = re.sub(r"\s*\(rev [0-9a-fA-F]+\)", "", name).strip()
+
+        result.append(f"{name} [{kind}]")
+    return result
+
+
+def memory_info() -> tuple[str, str]:
+    values: dict[str, int] = {}
+    for line in read_text("/proc/meminfo").splitlines():
+        if ":" in line:
+            key, rest = line.split(":", 1)
+            try:
+                values[key] = int(rest.split()[0])  # kB
+            except (IndexError, ValueError):
+                pass
+
+    total = values.get("MemTotal", 0) * 1024
+    available = values.get("MemAvailable", 0) * 1024
+    used = max(total - available, 0)
+    percent = int(round(used * 100 / total)) if total else 0
+    memory = f"{human_bytes(used)} / {human_bytes(total)} ({percent}%)" if total else ""
+
+    swap_total = values.get("SwapTotal", 0) * 1024
+    swap_free = values.get("SwapFree", 0) * 1024
+    swap_used = max(swap_total - swap_free, 0)
+    swap_percent = int(round(swap_used * 100 / swap_total)) if swap_total else 0
+    swap = (
+        f"{human_bytes(swap_used)} / {human_bytes(swap_total)} ({swap_percent}%)"
+        if swap_total else ""
+    )
+    return memory, swap
+
+
+def disk_info() -> str:
+    try:
+        stat = os.statvfs("/")
+    except OSError:
+        return ""
+    total = stat.f_blocks * stat.f_frsize
+    free = stat.f_bavail * stat.f_frsize
+    used = total - free
+    percent = int(round(used * 100 / total)) if total else 0
+    fstype = ""
+    for line in read_text("/proc/mounts").splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and parts[1] == "/":
+            fstype = parts[2]
+            break
+    suffix = f" - {fstype}" if fstype else ""
+    return f"{human_bytes(used)} / {human_bytes(total)} ({percent}%){suffix}"
+
+
+def local_ip() -> tuple[str, str] | None:
+    output = run(["ip", "-4", "-o", "addr", "show", "scope", "global"], timeout=1.0)
+    for line in output.splitlines():
+        match = re.search(r"^\d+:\s+(\S+)\s+inet\s+(\d+\.\d+\.\d+\.\d+/\d+)", line)
+        if match and match.group(1) != "lo":
+            return match.group(1), match.group(2)
+    return None
+
+
+def color_line(base: int) -> str:
+    return "".join(f"\x1b[{base + i}m   " for i in range(8)) + RESET
+
+
+# ---------------------------------------------------------------------------
+# Information block
+# ---------------------------------------------------------------------------
+
+def build_info() -> list[str]:
+    user = getpass.getuser()
+    host = socket.gethostname().split(".")[0]
+    title = f"{user}@{host}"
+
+    lines: list[str] = [
+        f"{TITLE}{title}{RESET}",
+        f"{TITLE}{'-' * len(title)}{RESET}",
+    ]
+
+    def add(key: str, value: str | None) -> None:
+        line = module(key, value)
+        if line:
+            lines.append(line)
+
+    add("OS", f"{os_release()} {os.uname().machine}")
+    add("Kernel", os.uname().release)
+    add("Uptime", uptime())
+    add("Packages", package_count())
+    add("Shell", shell_name())
+
+    for connector, mode in displays():
+        add(f"Display ({connector})", mode)
+
+    add("Window Manager", window_manager())
+    add("Theme", desktop_theme())
+    add("Font", desktop_font())
+    add("Cursor", desktop_cursor())
+    add("Terminal", terminal_name())
+    add("Terminal Font", terminal_font())
+    add("CPU", cpu_info())
+
+    for index, gpu in enumerate(gpu_info(), 1):
+        add(f"GPU {index}", gpu)
+
+    memory, swap = memory_info()
+    add("Memory", memory)
+    add("Swap", swap)
+    add("Disk (/)", disk_info())
+    ip = local_ip()
+    if ip:
+        add(f"Local IP ({ip[0]})", ip[1])
+    add("Locale", os.environ.get("LANG", ""))
+
+    lines.append("")
+    lines.append(color_line(40))
+    lines.append(color_line(100))
+    return lines
+
+
+def demo_info() -> list[str]:
+    title = "user@cachy"
+    lines: list[str] = [
+        f"{TITLE}{title}{RESET}",
+        f"{TITLE}{'-' * len(title)}{RESET}",
+    ]
+
+    def add(key: str, value: str) -> None:
+        line = module(key, value)
+        if line:
+            lines.append(line)
+
+    add("OS", "CachyOS x86_64")
+    add("Kernel", "6.18.1-cachyos")
+    add("Uptime", "2 hours, 41 mins")
+    add("Packages", "2238 (pacman), 30 (flatpak)")
+    add("Shell", "fish 4.9.3")
+    add("Display (DP-1)", "3440x1440 @ 180 Hz")
+    add("Window Manager", "niri 26.04 (Wayland)")
+    add("Theme", "Nordic-Darker-Solid [GTK3/4]")
+    add("Font", "Fira Sans (10pt) [GTK3/4]")
+    add("Terminal", "kitty 0.49.2")
+    add("CPU", "12th Gen Intel(R) Core(TM) i9-12900K (16C/24T) @ 5.20 GHz")
+    add("GPU", "NVIDIA GeForce RTX 4080 [Discrete]")
+    add("Memory", "12.4 GiB / 31.1 GiB (40%)")
+    add("Swap", "2.6 GiB / 31.1 GiB (8%)")
+    add("Disk (/)", "1.32 TiB / 1.34 TiB (98%) - btrfs")
+    add("Locale", "en_US.UTF-8")
+
+    lines.append("")
+    lines.append(color_line(40))
+    lines.append(color_line(100))
+    return lines
+
+
+# ---------------------------------------------------------------------------
+# Pipes animation (runs in the forked child)
+# ---------------------------------------------------------------------------
+
+def advance(pipe: tuple[int, int, int, int], width: int, height: int):
+    x, y, direction, color = pipe
+
+    if direction % 2:
+        x += -direction + 2
+    else:
+        y += direction - 1
+
+    if x >= width or x < 0 or y >= height or y < 0:
+        color = random.choice(PIPE_COLORS)
+    x %= width
+    y %= height
+
+    n = int(13 * random.random()) - 1
+    if n > 1 or n == 0:
+        n = direction
+    else:
+        n = direction + n
+    n = 3 if n < 0 else n % 4
+
+    glyph = PIPES[direction * 4 + n]
+    return (x, y, n, color), glyph
+
+
+FONT_5X5 = {
+    "0": ("#####", "#   #", "#   #", "#   #", "#####"),
+    "1": ("  #  ", " ##  ", "  #  ", "  #  ", " ### "),
+    "2": ("#####", "    #", "#####", "#    ", "#####"),
+    "3": ("#####", "    #", "#####", "    #", "#####"),
+    "4": ("#   #", "#   #", "#####", "    #", "    #"),
+    "5": ("#####", "#    ", "#####", "    #", "#####"),
+    "6": ("#####", "#    ", "#####", "#   #", "#####"),
+    "7": ("#####", "    #", "    #", "    #", "    #"),
+    "8": ("#####", "#   #", "#####", "#   #", "#####"),
+    "9": ("#####", "#   #", "#####", "    #", "#####"),
+}
+
+def _big_clock(text: str, size: int):
+    if any(ch not in "0123456789: " for ch in text):
+        return None
+
+    glyphs: list[list[str]] = []
+    for ch in text:
+        if ch == " ":
+            glyphs.append([" "] * 5)
+        elif ch == ":":
+            glyphs.append([" ", "#", " ", "#", " "])
+        else:
+            glyphs.append(list(FONT_5X5[ch]))
+
+    rows = [" ".join(glyph[row] for glyph in glyphs) for row in range(5)]
+    if size == 2:
+        # Pack pairs of pixel rows into half-block cells: a 3-row clock made
+        # from smaller block icons.
+        packed = []
+        for row in range(0, 5, 2):
+            top = rows[row]
+            bottom = rows[row + 1] if row + 1 < 5 else " " * len(top)
+            packed.append(
+                "".join(
+                    "█" if a == "#" and b == "#"
+                    else "▀" if a == "#"
+                    else "▄" if b == "#"
+                    else " "
+                    for a, b in zip(top, bottom)
+                )
+            )
+        return packed
+    return ["".join("█" if ch == "#" else " " for ch in row) for row in rows]
+
+
+def clock_position(cfg: dict, box_w: int, box_h: int):
+    if not cfg["clock"]:
+        return None
+    try:
+        text = time.strftime(cfg["clock_format"])
+    except (ValueError, TypeError):
+        text = time.strftime("%H:%M:%S")
+
+    lines = None
+    if cfg["clock_size"] in (2, 3):
+        lines = _big_clock(text, cfg["clock_size"])
+    if lines is None:
+        lines = [f" {text} "]
+
+    width = max(len(line) for line in lines)
+    height = len(lines)
+    inner_w = box_w - 2
+    inner_h = box_h - 2
+    if width > inner_w or height > inner_h:
+        # Too small for the selected clock; fall back to the small clock.
+        lines = [f" {text} "]
+        width = len(lines[0])
+        height = 1
+    if width > inner_w or height > inner_h:
+        return None
+
+    x = (inner_w - width) // 2
+    y = (inner_h - height) // 2
+    return x, y, width, height, tuple(lines), text
+
+
+def draw_clock(clock, box_x: int) -> None:
+    if not clock:
+        return
+    x, y, _width, _height, lines, _key = clock
+    out = ["\x1b7"]
+    for row, line in enumerate(lines):
+        out.append(
+            f"\x1b[{y + 2 + row};{box_x + x + 1}H{CLOCK_COLOR}{line}"
+        )
+    out.append(f"{RESET}\x1b8")
+    try:
+        os.write(1, "".join(out).encode())
+    except OSError:
+        pass
+
+
+def animate(
+    box_w: int,
+    box_h: int,
+    box_x: int,
+    info_width: int,
+    info_height: int,
+    info: list[str],
+    cfg: dict,
+    parent_pid: int,
+    pidfile: Path,
+) -> None:
+    # The terminal is the foreground process group at first, but this process
+    # must survive Ctrl-C at the prompt.
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+    signal.signal(signal.SIGQUIT, signal.SIG_IGN)
+
+    width = box_w - 2
+    height = box_h - 2
+    frame_time = 1.0 / max(1, cfg["fps"])
+    if width <= 2 or height <= 2:
+        return
+
+    pipe = (width // 2, height // 2, 0, random.choice(PIPE_COLORS))
+    grid: list[list[tuple[str, int] | None]] = [[None] * width for _ in range(height)]
+    clock = clock_position(cfg, box_w, box_h)
+    draw_clock(clock, box_x)
+    resize_flag = False
+
+    def on_winch(signum, frame):  # noqa: ARG001
+        nonlocal resize_flag
+        resize_flag = True
+
+    signal.signal(signal.SIGWINCH, on_winch)
+
+    def stop(signum, frame):  # noqa: ARG001
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGHUP, stop)
+
+    last_cols = last_rows = None
+    last_xpix = last_ypix = None
+    try:
+        cols, rows, xpix, ypix = terminal_geometry()
+        last_cols, last_rows = cols, rows
+        last_xpix, last_ypix = xpix, ypix
+    except OSError:
+        pass
+    frame = 0
+    try:
+        while os.getppid() == parent_pid:
+            # The shell also receives SIGWINCH; check size as well so a lost
+            # signal is still handled.
+            if resize_flag or frame % 8 == 0:
+                try:
+                    cols, rows, xpix, ypix = terminal_geometry()
+                except OSError:
+                    break
+                if (
+                    (cols, rows, xpix, ypix)
+                    != (last_cols, last_rows, last_xpix, last_ypix)
+                    or resize_flag
+                ):
+                    last_cols, last_rows = cols, rows
+                    last_xpix, last_ypix = xpix, ypix
+                    resize_flag = False
+                    new_layout = compute_layout(
+                        cfg, info_width, info_height,
+                        cols, rows, xpix, ypix,
+                    )
+                    if new_layout is None:
+                        # No room for the dashboard any more: turn the terminal
+                        # back into a normal shell.
+                        out = ["\x1b7"]
+                        for row in range(1, box_h + 1):
+                            out.append(f"\x1b[{row};1H\x1b[2K")
+                        out.append("\x1b[r\x1b8")
+                        try:
+                            os.write(1, "".join(out).encode())
+                        except OSError:
+                            pass
+                        return
+
+                    box_w, box_h, box_x = new_layout
+                    width = box_w - 2
+                    height = box_h - 2
+                    grid = [[None] * width for _ in range(height)]
+                    pipe = (width // 2, height // 2, 0, random.choice(PIPE_COLORS))
+                    # A size change makes the terminal reflow the old layout.
+                    # Clear and redraw everything once, then ask fish to
+                    # repaint its prompt at the new cursor position.
+                    time.sleep(0.05)
+                    draw_dashboard(info, box_w, box_h, box_x)
+                    clock = clock_position(cfg, box_w, box_h)
+                    draw_clock(clock, box_x)
+                    try:
+                        os.kill(parent_pid, signal.SIGWINCH)
+                    except OSError:
+                        pass
+
+            if cfg["clock"]:
+                new_clock = clock_position(cfg, box_w, box_h)
+                if new_clock != clock:
+                    clock = new_clock
+                    draw_clock(clock, box_x)
+
+            pipe, glyph = advance(pipe, width, height)
+            x, y, _, color = pipe
+            under_clock = (
+                clock is not None
+                and clock[1] <= y < clock[1] + clock[3]
+                and clock[0] <= x < clock[0] + clock[2]
+            )
+            if not under_clock:
+                grid[y][x] = None if glyph == " " else (glyph, color)
+                # Save/restore the cursor around every draw so fish's line
+                # editor keeps its position.
+                seq = f"\x1b7\x1b[{y + 2};{box_x + x + 1}H\x1b[1;3{color}m{glyph}\x1b8"
+                try:
+                    os.write(1, seq.encode())
+                except OSError:
+                    break
+            time.sleep(frame_time)
+            frame += 1
+    finally:
+        # Only remove the state files if they still point at this process; a
+        # newer piperfetch may have replaced them in the meantime.
+        try:
+            if pidfile.read_text().strip() == str(os.getpid()):
+                pidfile.unlink()
+        except OSError:
+            pass
+
+
+# ---------------------------------------------------------------------------
+# Layout and startup
+# ---------------------------------------------------------------------------
+
+def compute_layout(
+    cfg: dict, info_width: int, info_height: int,
+    cols: int, rows: int, xpix: int, ypix: int,
+) -> tuple[int, int, int] | None:
+    """Return (box_width, box_height, box_x), or None if it does not fit."""
+    max_cols, max_rows = configured_limits(cfg, cols, rows, xpix, ypix)
+
+    if cfg["specs"]:
+        if cfg["autosize"]:
+            box_w = cols - info_width - GAP
+            box_h = info_height
+        else:
+            box_w = cfg["width"]
+            box_h = cfg["height"]
+        # The information block must fit; let the box shrink if needed.
+        box_w = min(box_w, max_cols, cols)
+        total_w = box_w + GAP + info_width
+        if total_w > cols:
+            box_w = cols - info_width - GAP
+            total_w = box_w + GAP + info_width
+        # Do not clip information lines just because max_height is small.
+        box_h = min(box_h, rows - 1)
+        if box_h < info_height:
+            box_h = info_height
+    else:
+        if cfg["autosize"]:
+            box_w = cols
+            box_h = max(6, rows - cfg["shell_rows"])
+        else:
+            box_w = cfg["width"]
+            box_h = cfg["height"]
+        box_w = min(box_w, max_cols, cols)
+        box_h = min(box_h, max_rows, rows - 1)
+        total_w = box_w
+
+    if box_w < 12 or box_h < 4 or box_h >= rows or total_w > cols:
+        return None
+
+    if cfg["align"] == "center":
+        offset = (cols - total_w) // 2
+    elif cfg["align"] == "right":
+        offset = cols - total_w
+    else:
+        offset = 0
+    offset = max(0, min(offset, cols - total_w))
+    box_x = 1 + offset
+    return box_w, box_h, box_x
+
+
+def draw_dashboard(
+    info: list[str], box_w: int, box_h: int, box_x: int
+) -> None:
+    text_col = box_x + box_w + GAP
+    right_col = box_x + box_w - 1
+    out: list[str] = ["\x1b[?7l\x1b[r\x1b[2J\x1b[H"]
+
+    for row, line in enumerate(info, 1):
+        out.append(f"\x1b[{row};{text_col}H{line}")
+
+    out.append(BORDER)
+    out.append(f"\x1b[1;{box_x}H╭" + "─" * (box_w - 2) + "╮")
+    for row in range(2, box_h):
+        out.append(f"\x1b[{row};{box_x}H│")
+        out.append(f"\x1b[{row};{right_col}H│")
+    out.append(f"\x1b[{box_h};{box_x}H╰" + "─" * (box_w - 2) + "╯")
+    out.append(RESET)
+
+    shell_top = box_h + 1
+    out.append(f"\x1b[{shell_top};1H\x1b[0m\x1b[?25h\x1b[?7h")
+    sys.stdout.write("".join(out))
+    sys.stdout.flush()
+
+
+def exec_shell() -> None:
+    shell = os.environ.get("SHELL") or shutil.which("fish") or "/bin/sh"
+    try:
+        os.execvp(shell, [shell])
+    except OSError:
+        os.execvp("/bin/sh", ["sh"])
+
+
+def main() -> None:
+    if "--info" in sys.argv:
+        sys.stdout.write("\n".join(build_info()) + "\n")
+        return
+
+    if "--version" in sys.argv:
+        print("piperfetch 0.1.0")
+        return
+
+    if not sys.stdout.isatty():
+        sys.stdout.write("\n".join(build_info()) + "\n")
+        return
+
+    demo = "--demo" in sys.argv
+    try:
+        if demo:
+            cfg = dict(CONFIG_DEFAULTS)
+            cfg.update(
+                specs=True,
+                autosize=True,
+                max_width=900,
+                max_height=700,
+                align="left",
+                clock=True,
+                clock_size=2,
+            )
+            info = demo_info()
+            info_width = max(visible_width(line) for line in info)
+            info_height = len(info)
+        else:
+            cfg = load_config()
+            if cfg["specs"]:
+                info = build_info()
+                info_width = max(visible_width(line) for line in info)
+                info_height = len(info)
+            else:
+                info = []
+                info_width = 0
+                info_height = 0
+    except Exception:
+        exec_shell()
+        return
+
+    cols, rows, xpix, ypix = terminal_geometry()
+    layout = compute_layout(
+        cfg, info_width, info_height, cols, rows, xpix, ypix
+    )
+
+    # Not enough room: behave like plain fastfetch and give the user a shell.
+    if layout is None:
+        if info:
+            sys.stdout.write("\n".join(info) + "\n")
+            sys.stdout.flush()
+        exec_shell()
+        return
+    box_w, box_h, box_x = layout
+
+    try:
+        draw_dashboard(info, box_w, box_h, box_x)
+    except Exception:
+        exec_shell()
+        return
+
+    state_dir = Path(os.environ.get("XDG_RUNTIME_DIR", "/tmp"))
+    pidfile = state_dir / f"piperfetch-{os.getpid()}.pid"
+    parent_pid = os.getpid()
+
+    # Replace a stale animation from a previous piperfetch in this shell.
+    try:
+        old_pid = int(pidfile.read_text().strip())
+        os.kill(old_pid, signal.SIGTERM)
+    except (OSError, ValueError):
+        pass
+    for suffix in ("", ".pause"):
+        try:
+            Path(str(pidfile) + suffix).unlink()
+        except OSError:
+            pass
+
+    try:
+        child = os.fork()
+    except OSError:
+        child = -1
+
+    if child == 0:
+        animate(
+            box_w, box_h, box_x, info_width, info_height, info, cfg,
+            parent_pid, pidfile,
+        )
+        os._exit(0)
+    elif child > 0:
+        try:
+            pidfile.write_text(f"{child}\n")
+        except OSError:
+            pass
+
+    exec_shell()
+
+
+if __name__ == "__main__":
+    main()
