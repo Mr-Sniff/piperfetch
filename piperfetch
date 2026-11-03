@@ -38,6 +38,7 @@ PIPES = "│╭ ╮╯─╮  ╰│╯╰ ╭─"
 PIPE_COLORS = (1, 2, 3, 4, 5, 6, 7)  # no black
 DEFAULT_FPS = 38                     # pipes.sh default is 75
 GAP = 2
+SHELL_GAP = 1                        # keeps fish's resize repaint off the border
 CLOCK_COLOR = "\x1b[1;97m"
 
 CONFIG_DEFAULTS = {
@@ -839,7 +840,7 @@ def compute_layout(
             box_w = cols - info_width - GAP
             total_w = box_w + GAP + info_width
         # Do not clip information lines just because max_height is small.
-        box_h = min(box_h, rows - 1)
+        box_h = min(box_h, rows - 1 - SHELL_GAP)
         if box_h < info_height:
             box_h = info_height
     else:
@@ -850,10 +851,15 @@ def compute_layout(
             box_w = cfg["width"]
             box_h = cfg["height"]
         box_w = min(box_w, max_cols, cols)
-        box_h = min(box_h, max_rows, rows - 1)
+        box_h = min(box_h, max_rows, rows - 1 - SHELL_GAP)
         total_w = box_w
 
-    if box_w < 12 or box_h < 4 or box_h >= rows or total_w > cols:
+    if (
+        box_w < 12
+        or box_h < 4
+        or box_h > rows - 1 - SHELL_GAP
+        or total_w > cols
+    ):
         return None
 
     if cfg["align"] == "center":
@@ -885,7 +891,7 @@ def draw_dashboard(
     out.append(f"\x1b[{box_h};{box_x}H╰" + "─" * (box_w - 2) + "╯")
     out.append(RESET)
 
-    shell_top = box_h + 1
+    shell_top = box_h + 1 + SHELL_GAP
     out.append(f"\x1b[{shell_top};1H\x1b[0m\x1b[?25h\x1b[?7h")
     sys.stdout.write("".join(out))
     sys.stdout.flush()
