@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.0 — 2026-11-04
+
+- Added the `orbs` effect: 2–4 slowly breathing, drifting lava-lamp blobs
+  with selectable colour.
+- Reworked `stars` into a calm, mostly static night sky with sparse
+  twinkling instead of fast movement.
+- Tuned defaults for every effect to calmer, more usable speeds.
+- Documented how `fps` and per-effect speed settings combine.
+
 ## 1.0.0 — 2026-11-04
 
 - First stable release.

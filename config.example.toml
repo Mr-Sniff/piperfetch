@@ -50,34 +50,45 @@ pipe_colors = "1,2,3,4,5,6,7"
 # density: fraction of columns active (0.0-1.0).
 # trail: length behind the bright head, in cells.
 # color: green, cyan, blue, purple, magenta, red, yellow, white.
-matrix_speed = 1
-matrix_density = 0.45
+matrix_speed = 2
+matrix_density = 0.35
 matrix_trail = 10
 matrix_color = "green"
 
 # ── Rain (only when effect = "rain") ──────────────────────────────────
-rain_speed = 1
+rain_speed = 2
 rain_density = 0.25
 rain_trail = 8
 rain_color = "cyan"
 
 # ── Stars (only when effect = "stars") ────────────────────────────────
 # density is a percentage of cells (0-100).
+# speed is a twinkle interval; higher = calmer.
 # color: multi, or green/cyan/blue/purple/magenta/red/yellow/white.
-stars_density = 2
-stars_speed = 1
+stars_density = 3
+stars_speed = 2
 stars_color = "multi"
 
 # ── Fire (only when effect = "fire") ──────────────────────────────────
 # intensity: 0-100, how much fuel/heat is fed at the bottom.
 fire_intensity = 80
-fire_speed = 1
+fire_speed = 2
 
 # ── Bubbles (only when effect = "bubbles") ────────────────────────────
 # density is a percentage of cells (0-100).
 bubble_density = 2
-bubble_speed = 1
+bubble_speed = 2
 bubble_color = "cyan"
+
+# ── Orbs (only when effect = "orbs") ──────────────────────────────────
+# count: 2-4 blobs. They expand, contract and drift slowly.
+# speed: 1-4. min_size/max_size are radii in character cells.
+# color: multi, or green/cyan/blue/purple/magenta/red/yellow/white.
+orb_count = 3
+orb_speed = 1
+orb_min_size = 3
+orb_max_size = 8
+orb_color = "purple"
 
 # ── Plasma (only when effect = "plasma") ──────────────────────────────
 plasma_speed = 1

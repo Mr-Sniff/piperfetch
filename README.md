@@ -1,7 +1,7 @@
 # piperfetch
 
 A small, self-contained fastfetch-style terminal dashboard with live
-animations: pipes, Matrix rain, blue rain, stars, fire, bubbles, or plasma.
+animations: pipes, Matrix rain, blue rain, stars, fire, bubbles, orbs, or plasma.
 
 ![piperfetch demo](demo.gif)
 
@@ -110,6 +110,9 @@ cp config.example.toml ~/.config/piperfetch/config.toml
   19 times per second.
 - `matrix_density` is the fraction of columns that participate (`0.0–1.0`);
   `matrix_trail` is the length behind each bright head.
+- `stars_speed` controls how often a few stars twinkle; stars stay in place.
+- `orb_speed` controls both the expansion cycle and slow drift of the orbs;
+  `orb_min_size` / `orb_max_size` are radii in cells.
 - `max_width` / `max_height` are **pixel** caps; with `autosize = false`,
   `width` / `height` are character-cell sizes.
 - `specs = false` hides the information block; `shell_rows` then controls how
@@ -126,7 +129,7 @@ cp config.example.toml ~/.config/piperfetch/config.toml
 | `max_width`, `max_height` | pixels (`0` = off) | Cap the box |
 | `align` | `left`, `center`, `right` | Horizontal placement |
 | `shell_rows` | rows | Space below the box when specs are off |
-| `effect` | `pipes`, `matrix`, `rain`, `stars`, `fire`, `bubbles`, `plasma`, `none` | Select one animation |
+| `effect` | `pipes`, `matrix`, `rain`, `stars`, `fire`, `bubbles`, `orbs`, `plasma`, `none` | Select one animation |
 | `fps` | `1–240` | Master frame rate |
 | `pipe_type` | `0–9` | Pipes glyph style |
 | `pipe_colors` | `"1,2,3,4,5,6,7"` | ANSI foreground colors 1–7 |
@@ -135,13 +138,17 @@ cp config.example.toml ~/.config/piperfetch/config.toml
 | `matrix_trail`, `rain_trail` | `2–40` | Trail length in cells |
 | `matrix_color`, `rain_color` | colour name | `green`, `cyan`, etc. |
 | `stars_density` | `0–100` | Percentage of stars |
-| `stars_speed` | `1–4` | Star movement step |
+| `stars_speed` | `1–4` | Twinkle interval; higher = calmer |
 | `stars_color` | `multi` or colour | Star colour |
 | `fire_intensity` | `0–100` | Fuel/heat amount |
 | `fire_speed` | `1–4` | Frame divisor |
 | `bubble_density` | `0–100` | Percentage of bubbles |
 | `bubble_speed` | `1–4` | Rise step |
 | `bubble_color` | colour name | Bubble colour |
+| `orb_count` | `2–4` | Number of orbs |
+| `orb_speed` | `1–4` | Expansion/drift speed |
+| `orb_min_size`, `orb_max_size` | cells | Orb radii |
+| `orb_color` | `multi` or colour | Orb colour |
 | `plasma_speed` | `1–4` | Frame divisor |
 | `plasma_scale` | `0.1–5.0` | Wave tightness |
 | `clock` | `true` / `false` | Show the clock |
@@ -164,6 +171,7 @@ Set `effect` in the config to choose the animation:
 | `stars` | A drifting starfield |
 | `fire` | Flames rising from the bottom |
 | `bubbles` | Bubbles drifting upward |
+| `orbs` | Slow lava-lamp orbs that expand and contract |
 | `plasma` | Slow multicolour plasma waves |
 | `none` | No animation; clock and border only |
 

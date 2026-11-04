@@ -67,14 +67,15 @@ COLOR_SCHEMES = {
     "white": ("\x1b[1;97m", "\x1b[37m"),
 }
 
-EFFECTS = ("pipes", "matrix", "rain", "stars", "fire", "bubbles", "plasma", "none")
+EFFECTS = ("pipes", "matrix", "rain", "stars", "fire", "bubbles", "orbs", "plasma", "none")
 EFFECT_DESCRIPTIONS = {
     "pipes": "classic pipes.sh-style screensaver",
     "matrix": "green falling glyph columns",
     "rain": "blue falling drop columns",
-    "stars": "drifting starfield",
+    "stars": "flickering night sky",
     "fire": "flames rising from the bottom",
     "bubbles": "bubbles drifting upward",
+    "orbs": "slow lava-lamp orbs that breathe",
     "plasma": "slow multicolour plasma waves",
     "none": "no animation, clock and border only",
 }
@@ -96,25 +97,31 @@ CONFIG_DEFAULTS = {
     "pipe_type": 1,
     "pipe_colors": PIPE_COLORS,
     # matrix / rain
-    "matrix_speed": 1,
-    "matrix_density": 0.45,
+    "matrix_speed": 2,
+    "matrix_density": 0.35,
     "matrix_trail": 10,
     "matrix_color": "green",
-    "rain_speed": 1,
+    "rain_speed": 2,
     "rain_density": 0.25,
     "rain_trail": 8,
     "rain_color": "cyan",
     # stars
-    "stars_density": 2,
-    "stars_speed": 1,
+    "stars_density": 3,
+    "stars_speed": 2,
     "stars_color": "multi",
     # fire
     "fire_intensity": 80,
-    "fire_speed": 1,
+    "fire_speed": 2,
     # bubbles
     "bubble_density": 2,
-    "bubble_speed": 1,
+    "bubble_speed": 2,
     "bubble_color": "cyan",
+    # orbs
+    "orb_count": 3,
+    "orb_speed": 1,
+    "orb_min_size": 3,
+    "orb_max_size": 8,
+    "orb_color": "purple",
     # plasma
     "plasma_speed": 1,
     "plasma_scale": 1.0,
@@ -195,6 +202,10 @@ def load_config(path: str | Path | None = None) -> dict:
         ("stars_speed", 1, 4),
         ("fire_speed", 1, 4),
         ("bubble_speed", 1, 4),
+        ("orb_count", 2, 4),
+        ("orb_speed", 1, 4),
+        ("orb_min_size", 1, 30),
+        ("orb_max_size", 2, 40),
         ("plasma_speed", 1, 4),
         ("fire_intensity", 0, 100),
         ("stars_density", 0, 100),
@@ -217,11 +228,12 @@ def load_config(path: str | Path | None = None) -> dict:
         value = data.get(key)
         if isinstance(value, str) and value.lower() in COLOR_SCHEMES:
             cfg[key] = value.lower()
-    value = data.get("stars_color")
-    if isinstance(value, str) and (
-        value.lower() == "multi" or value.lower() in COLOR_SCHEMES
-    ):
-        cfg["stars_color"] = value.lower()
+    for key in ("stars_color", "orb_color"):
+        value = data.get(key)
+        if isinstance(value, str) and (
+            value.lower() == "multi" or value.lower() in COLOR_SCHEMES
+        ):
+            cfg[key] = value.lower()
 
     if isinstance(data.get("clock_format"), str) and data["clock_format"]:
         cfg["clock_format"] = data["clock_format"]
@@ -1037,37 +1049,133 @@ class ColumnRainEffect:
 
 
 class StarsEffect:
+    """A mostly static night sky with slow, sparse twinkling."""
+
     def __init__(
         self, width: int, height: int, density: float, speed: int, color: str
     ):
         self.width = width
         self.height = height
         self.speed = max(1, speed)
-        self.stars = []
+        self.tick = 0
+        self.initial = True
         if color == "multi":
-            colors = ("\x1b[1;37m", "\x1b[1;36m", "\x1b[34m")
+            self.palette = (
+                "\x1b[2;37m", "\x1b[37m", "\x1b[1;36m", "\x1b[34m",
+            )
         else:
-            colors = (COLOR_SCHEMES[color][0],)
+            head, tail = COLOR_SCHEMES[color]
+            self.palette = (tail, head)
         count = max(0, int(width * height * density / 100))
+        self.stars = []
         for _ in range(count):
             self.stars.append({
                 "x": random.randrange(width),
                 "y": random.randrange(height),
                 "char": random.choice(("*", "+", ".", "·")),
-                "color": random.choice(colors),
+                "color": random.choice(self.palette),
             })
 
     def step(self):
+        if self.initial:
+            self.initial = False
+            return [
+                (star["x"], star["y"], star["char"], star["color"])
+                for star in self.stars
+            ]
+
+        self.tick += 1
+        # Twinkle a few stars every few frames; no movement.
+        if self.tick % (self.speed * 8):
+            return []
+        if not self.stars:
+            return []
         out = []
-        for star in self.stars:
-            old_x, old_y = star["x"], star["y"]
-            out.append((old_x, old_y, " ", star["color"]))
-            star["x"] = (star["x"] - self.speed) % self.width
-            star["y"] = (
-                star["y"] + random.choice((0, 0, 1))
-            ) % self.height
-            out.append((star["x"], star["y"], star["char"], star["color"]))
+        for star in random.sample(self.stars, max(1, len(self.stars) // 8)):
+            out.append((
+                star["x"], star["y"],
+                random.choice(("*", "+", ".", "·", " ")),
+                random.choice(self.palette),
+            ))
         return out
+
+
+class OrbsEffect:
+    """Two to four soft blobs that expand, contract and drift slowly."""
+
+    def __init__(
+        self, cfg: dict, width: int, height: int
+    ):
+        self.width = width
+        self.height = height
+        self.speed = max(1, cfg["orb_speed"])
+        max_size = min(cfg["orb_max_size"], max(2, min(width, height) // 2))
+        min_size = min(cfg["orb_min_size"], max_size)
+        self.min_size = max(1.0, float(min_size))
+        self.max_size = max(self.min_size + 0.5, float(max_size))
+        if cfg["orb_color"] == "multi":
+            palettes = list(COLOR_SCHEMES.values())
+        else:
+            palettes = [COLOR_SCHEMES[cfg["orb_color"]]]
+        self.orbs = []
+        for _ in range(cfg["orb_count"]):
+            head, tail = random.choice(palettes)
+            self.orbs.append({
+                "x": random.uniform(0, max(0, width - 1)),
+                "y": random.uniform(0, max(0, height - 1)),
+                "vx": random.choice((-1, 1)) * random.uniform(0.01, 0.035),
+                "vy": random.choice((-1, 1)) * random.uniform(0.01, 0.035),
+                "phase": random.uniform(0, math.tau),
+                "head": head,
+                "tail": tail,
+            })
+
+    def step(self):
+        self.time = getattr(self, "time", 0.0) + 0.015 * self.speed
+        for orb in self.orbs:
+            orb["phase"] += 0.015 * self.speed
+            radius = self.min_size + (self.max_size - self.min_size) * (
+                0.5 + 0.5 * math.sin(orb["phase"])
+            )
+            orb["radius"] = radius
+            orb["x"] += orb["vx"] * self.speed
+            orb["y"] += orb["vy"] * self.speed
+            if orb["x"] < 0 or orb["x"] > self.width - 1:
+                orb["vx"] *= -1
+                orb["x"] = max(0, min(self.width - 1, orb["x"]))
+            if orb["y"] < 0 or orb["y"] > self.height - 1:
+                orb["vy"] *= -1
+                orb["y"] = max(0, min(self.height - 1, orb["y"]))
+
+        out = []
+        for y in range(self.height):
+            for x in range(self.width):
+                best = None
+                for orb in self.orbs:
+                    dx = (x + 0.5) - orb["x"]
+                    dy = ((y + 0.5) - orb["y"]) * 0.55
+                    ratio = math.hypot(dx, dy) / orb["radius"]
+                    if ratio < 1.0 and (best is None or ratio < best[0]):
+                        best = (ratio, orb)
+                if best is None:
+                    out.append((x, y, " ", RESET))
+                    continue
+                ratio, orb = best
+                if ratio < 0.35:
+                    char = "█"
+                elif ratio < 0.6:
+                    char = "▓"
+                elif ratio < 0.8:
+                    char = "▒"
+                else:
+                    char = "░"
+                color = orb["head"] if ratio < 0.6 else orb["tail"]
+                out.append((x, y, char, color))
+        return out
+
+
+MATRIX_CHARS = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉ0123456789"
+RAIN_CHARS = "|/\\."
 
 
 class FireEffect:
@@ -1185,10 +1293,6 @@ class PlasmaEffect:
         return out
 
 
-MATRIX_CHARS = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉ0123456789"
-RAIN_CHARS = "|/\\."
-
-
 def make_effect(cfg: dict, width: int, height: int):
     name = cfg["effect"]
     if name == "matrix":
@@ -1217,6 +1321,8 @@ def make_effect(cfg: dict, width: int, height: int):
             width, height, cfg["bubble_density"],
             cfg["bubble_speed"], cfg["bubble_color"],
         )
+    if name == "orbs":
+        return OrbsEffect(cfg, width, height)
     if name == "plasma":
         return PlasmaEffect(
             width, height, cfg["plasma_speed"], cfg["plasma_scale"]
@@ -1583,7 +1689,7 @@ def main() -> None:
         return
 
     if "--version" in sys.argv:
-        print("piperfetch 1.0.0")
+        print("piperfetch 1.1.0")
         return
 
     config_override = cli_value("--config")
