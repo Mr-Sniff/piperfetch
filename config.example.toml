@@ -76,12 +76,13 @@ fire_speed = 2
 
 # ── Bubbles (only when effect = "bubbles") ────────────────────────────
 # density is a percentage of cells (0-100).
+# speed is a frame divisor; higher = slower.
 bubble_density = 2
-bubble_speed = 2
+bubble_speed = 6
 bubble_color = "cyan"
 
 # ── Orbs (only when effect = "orbs") ──────────────────────────────────
-# count: 2-4 blobs. They expand, contract and drift slowly.
+# count: 2-4 evenly spaced blobs that expand and contract slowly.
 # speed: 1-4. min_size/max_size are radii in character cells.
 # color: multi, or green/cyan/blue/purple/magenta/red/yellow/white.
 orb_count = 3

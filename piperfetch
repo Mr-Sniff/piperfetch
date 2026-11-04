@@ -114,7 +114,7 @@ CONFIG_DEFAULTS = {
     "fire_speed": 2,
     # bubbles
     "bubble_density": 2,
-    "bubble_speed": 2,
+    "bubble_speed": 6,
     "bubble_color": "cyan",
     # orbs
     "orb_count": 3,
@@ -201,7 +201,7 @@ def load_config(path: str | Path | None = None) -> dict:
         ("rain_trail", 2, 40),
         ("stars_speed", 1, 4),
         ("fire_speed", 1, 4),
-        ("bubble_speed", 1, 4),
+        ("bubble_speed", 1, 12),
         ("orb_count", 2, 4),
         ("orb_speed", 1, 4),
         ("orb_min_size", 1, 30),
@@ -1101,7 +1101,7 @@ class StarsEffect:
 
 
 class OrbsEffect:
-    """Two to four soft blobs that expand, contract and drift slowly."""
+    """Two to four soft blobs, evenly spaced and breathing slowly."""
 
     def __init__(
         self, cfg: dict, width: int, height: int
@@ -1113,51 +1113,35 @@ class OrbsEffect:
         min_size = min(cfg["orb_min_size"], max_size)
         self.min_size = max(1.0, float(min_size))
         self.max_size = max(self.min_size + 0.5, float(max_size))
-        self.margin_x = min(self.max_size, max(0.0, (width - 1) / 2))
-        self.margin_y = min(
-            self.max_size / 2.2, max(0.0, (height - 1) / 2)
-        )
+        margin_x = min(self.max_size, max(0.0, (width - 1) / 2))
+        margin_y = min(self.max_size / 2.2, max(0.0, (height - 1) / 2))
+        cx = (width - 1) / 2
+        cy = (height - 1) / 2
+        rx = max(0.0, (width - 1) / 2 - margin_x)
+        ry = max(0.0, (height - 1) / 2 - margin_y)
         if cfg["orb_color"] == "multi":
             palettes = list(COLOR_SCHEMES.values())
         else:
             palettes = [COLOR_SCHEMES[cfg["orb_color"]]]
         self.orbs = []
-        for _ in range(cfg["orb_count"]):
+        count = cfg["orb_count"]
+        for index in range(count):
             head, tail = random.choice(palettes)
+            angle = -math.pi / 2 + math.tau * index / count
             self.orbs.append({
-                "x": random.uniform(
-                    self.margin_x,
-                    max(self.margin_x, width - 1 - self.margin_x),
-                ),
-                "y": random.uniform(
-                    self.margin_y,
-                    max(self.margin_y, height - 1 - self.margin_y),
-                ),
-                "vx": random.choice((-1, 1)) * random.uniform(0.01, 0.035),
-                "vy": random.choice((-1, 1)) * random.uniform(0.01, 0.035),
+                "x": cx + rx * math.cos(angle),
+                "y": cy + ry * math.sin(angle),
                 "phase": random.uniform(0, math.tau),
                 "head": head,
                 "tail": tail,
             })
 
     def step(self):
-        self.time = getattr(self, "time", 0.0) + 0.015 * self.speed
         for orb in self.orbs:
             orb["phase"] += 0.015 * self.speed
-            radius = self.min_size + (self.max_size - self.min_size) * (
+            orb["radius"] = self.min_size + (self.max_size - self.min_size) * (
                 0.5 + 0.5 * math.sin(orb["phase"])
             )
-            orb["radius"] = radius
-            orb["x"] += orb["vx"] * self.speed
-            orb["y"] += orb["vy"] * self.speed
-            x_hi = max(self.margin_x, self.width - 1 - self.margin_x)
-            y_hi = max(self.margin_y, self.height - 1 - self.margin_y)
-            if orb["x"] < self.margin_x or orb["x"] > x_hi:
-                orb["vx"] *= -1
-                orb["x"] = max(self.margin_x, min(x_hi, orb["x"]))
-            if orb["y"] < self.margin_y or orb["y"] > y_hi:
-                orb["vy"] *= -1
-                orb["y"] = max(self.margin_y, min(y_hi, orb["y"]))
 
         out = []
         for y in range(self.height):
@@ -1244,6 +1228,7 @@ class BubblesEffect:
         self.width = width
         self.height = height
         self.speed = max(1, speed)
+        self.tick = 0
         colors = COLOR_SCHEMES[color]
         count = max(0, int(width * height * density / 100))
         self.bubbles = []
@@ -1256,11 +1241,14 @@ class BubblesEffect:
             })
 
     def step(self):
+        self.tick += 1
+        if self.tick % self.speed:
+            return []
         out = []
         for bubble in self.bubbles:
             old_x, old_y = bubble["x"], bubble["y"]
             out.append((old_x, old_y, " ", bubble["color"]))
-            bubble["y"] -= self.speed
+            bubble["y"] -= 1
             if bubble["y"] < 0:
                 bubble["y"] = self.height - 1
                 bubble["x"] = random.randrange(self.width)
@@ -1680,6 +1668,7 @@ def usage() -> str:
         "  --config PATH   use an alternate config file\n"
         "  --demo          sanitized demo layout\n"
         "  --demo-effect E render only effect E for preview captures\n"
+        "  --demo-clock N  render clock size N for preview captures\n"
         "  --info          print the information block only\n"
         "  --list-effects  list available animations\n"
         "  --check-config  print the effective configuration\n"
@@ -1721,8 +1710,30 @@ def main() -> None:
     demo_effect = cli_value("--demo-effect")
     if demo_effect not in EFFECTS:
         demo_effect = None
+    demo_clock = cli_value("--demo-clock")
     try:
-        if demo_effect:
+        demo_clock = int(demo_clock) if demo_clock is not None else None
+    except ValueError:
+        demo_clock = None
+    if demo_clock not in (1, 2, 3):
+        demo_clock = None
+    try:
+        if demo_clock:
+            cfg = dict(CONFIG_DEFAULTS)
+            cfg.update(
+                specs=False,
+                autosize=True,
+                max_width=900,
+                max_height=700,
+                align="left",
+                clock=True,
+                clock_size=demo_clock,
+                effect="matrix",
+            )
+            info = []
+            info_width = 0
+            info_height = 0
+        elif demo_effect:
             cfg = dict(CONFIG_DEFAULTS)
             cfg.update(
                 specs=False,
@@ -1817,7 +1828,7 @@ def main() -> None:
         except OSError:
             pass
 
-    if demo_effect:
+    if demo_effect or demo_clock:
         sys.stdout.write("\x1b[?25l")
         sys.stdout.flush()
         try:

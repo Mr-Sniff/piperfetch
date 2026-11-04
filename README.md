@@ -5,11 +5,63 @@ animations: pipes, Matrix rain, blue rain, stars, fire, bubbles, orbs, or plasma
 
 ![piperfetch demo](demo.gif)
 
+## Effects
+
+Set `effect` in the config to choose the animation:
+
+<table>
+<tr>
+<td align="center"><b>pipes</b><br><img src="demos/pipes.gif" width="300"><br><sub>classic pipes screensaver</sub></td>
+<td align="center"><b>matrix</b><br><img src="demos/matrix.gif" width="300"><br><sub>green falling glyphs</sub></td>
+<td align="center"><b>rain</b><br><img src="demos/rain.gif" width="300"><br><sub>blue falling drops</sub></td>
+</tr>
+<tr>
+<td align="center"><b>stars</b><br><img src="demos/stars.gif" width="300"><br><sub>flickering night sky</sub></td>
+<td align="center"><b>fire</b><br><img src="demos/fire.gif" width="300"><br><sub>flames from the bottom</sub></td>
+<td align="center"><b>bubbles</b><br><img src="demos/bubbles.gif" width="300"><br><sub>bubbles drifting upward</sub></td>
+</tr>
+<tr>
+<td align="center"><b>orbs</b><br><img src="demos/orbs.gif" width="300"><br><sub>breathing lava-lamp orbs</sub></td>
+<td align="center"><b>plasma</b><br><img src="demos/plasma.gif" width="300"><br><sub>multicolour plasma waves</sub></td>
+<td align="center"><b>none</b><br><img src="demos/none.gif" width="300"><br><sub>clock and border only</sub></td>
+</tr>
+</table>
+
+The previews above show only the effect area; the clock, border and system
+information still work with every effect. See the main demo at the top for the
+full layout.
+
+**Orbs** uses `orb_count` (2–4), `orb_speed`, `orb_min_size` /
+`orb_max_size` (radii in cells), and `orb_color` (a colour name or `multi`).
+
+### Clock sizes
+
+The clock is independent of the effect and can be one line or a block display:
+
+<table>
+<tr>
+<td align="center"><b>clock_size = 1</b><br><img src="demos/clock-size-1.gif" width="300"><br><sub>one-line text</sub></td>
+<td align="center"><b>clock_size = 2</b><br><img src="demos/clock-size-2.gif" width="300"><br><sub>3-row half-block digits</sub></td>
+<td align="center"><b>clock_size = 3</b><br><img src="demos/clock-size-3.gif" width="300"><br><sub>5-row block digits</sub></td>
+</tr>
+</table>
+
+```toml
+clock = true
+clock_size = 2          # 1, 2 or 3
+clock_format = "%H:%M:%S"
+```
+
+Clock sizes work over every effect. Formats must contain only digits, spaces
+and `:` for the block clocks; other formats use the one-line clock.
+
+## How it behaves
+
 The dashboard sits at the top until you run a command. That means:
 
 - the prompt is available immediately;
 - typing works normally;
-- the pipes keep animating while you are at the prompt;
+- the selected effect keeps animating while you are at the prompt;
 - when a command starts, the animation stops so its output can scroll the
   dashboard up naturally; a long output pushes it out of sight;
 - `clear` / Ctrl-L removes the dashboard and returns to a normal shell.
@@ -111,7 +163,7 @@ cp config.example.toml ~/.config/piperfetch/config.toml
 - `matrix_density` is the fraction of columns that participate (`0.0–1.0`);
   `matrix_trail` is the length behind each bright head.
 - `stars_speed` controls how often a few stars twinkle; stars stay in place.
-- `orb_speed` controls both the expansion cycle and slow drift of the orbs;
+- `orb_speed` controls the orbs' expansion/contraction cycle;
   `orb_min_size` / `orb_max_size` are radii in cells.
 - `max_width` / `max_height` are **pixel** caps; with `autosize = false`,
   `width` / `height` are character-cell sizes.
@@ -143,10 +195,10 @@ cp config.example.toml ~/.config/piperfetch/config.toml
 | `fire_intensity` | `0–100` | Fuel/heat amount |
 | `fire_speed` | `1–4` | Frame divisor |
 | `bubble_density` | `0–100` | Percentage of bubbles |
-| `bubble_speed` | `1–4` | Rise step |
+| `bubble_speed` | `1–12` | Frame divisor; higher = slower |
 | `bubble_color` | colour name | Bubble colour |
 | `orb_count` | `2–4` | Number of orbs |
-| `orb_speed` | `1–4` | Expansion/drift speed |
+| `orb_speed` | `1–4` | Expansion speed |
 | `orb_min_size`, `orb_max_size` | cells | Orb radii |
 | `orb_color` | `multi` or colour | Orb colour |
 | `plasma_speed` | `1–4` | Frame divisor |
@@ -158,35 +210,6 @@ cp config.example.toml ~/.config/piperfetch/config.toml
 The box, clock and information block are redrawn when the terminal is resized.
 Resizing clears the visible shell area so reflowed dashboard lines cannot leave
 artifacts behind.
-
-## Effects
-
-Set `effect` in the config to choose the animation:
-
-<table>
-<tr>
-<td align="center"><b>pipes</b><br><img src="demos/pipes.gif" width="300"><br><sub>classic pipes screensaver</sub></td>
-<td align="center"><b>matrix</b><br><img src="demos/matrix.gif" width="300"><br><sub>green falling glyphs</sub></td>
-<td align="center"><b>rain</b><br><img src="demos/rain.gif" width="300"><br><sub>blue falling drops</sub></td>
-</tr>
-<tr>
-<td align="center"><b>stars</b><br><img src="demos/stars.gif" width="300"><br><sub>flickering night sky</sub></td>
-<td align="center"><b>fire</b><br><img src="demos/fire.gif" width="300"><br><sub>flames from the bottom</sub></td>
-<td align="center"><b>bubbles</b><br><img src="demos/bubbles.gif" width="300"><br><sub>bubbles drifting upward</sub></td>
-</tr>
-<tr>
-<td align="center"><b>orbs</b><br><img src="demos/orbs.gif" width="300"><br><sub>breathing lava-lamp orbs</sub></td>
-<td align="center"><b>plasma</b><br><img src="demos/plasma.gif" width="300"><br><sub>multicolour plasma waves</sub></td>
-<td align="center"><b>none</b><br><img src="demos/none.gif" width="300"><br><sub>clock and border only</sub></td>
-</tr>
-</table>
-
-The previews above show only the effect area; the clock, border and system
-information still work with every effect. See the main demo at the top for the
-full layout.
-
-**Orbs** uses `orb_count` (2–4), `orb_speed`, `orb_min_size` /
-`orb_max_size` (radii in cells), and `orb_color` (a colour name or `multi`).
 
 ## Terminals and shells
 
@@ -297,6 +320,7 @@ default.
 - `shell/zsh-piperfetch.zsh` — zsh hooks
 - `demo.gif` — full-layout animated demo
 - `demos/` — one preview GIF per effect
+- `demos/clock-size-*.gif` — clock size showcases
 - `CHANGELOG.md` — release history
 - `LICENSE` — MIT
 - `README.md` — this file
