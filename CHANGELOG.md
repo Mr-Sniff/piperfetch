@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 1.3.0 — 2026-11-04
+
+First tagged release.
 
 - The shell hooks now pause the animation while a command runs, resume it
   when the dashboard is still visible, and retire it once output has scrolled
@@ -9,6 +11,7 @@
   default, and accepted values.
 - Refreshed the README demo GIF with the current spec-sheet styling and fixed
   the spec-sheet crop in the showcase video.
+- Added a config-key regression test covering 79 checks.
 
 ## 1.2.0 — 2026-11-04
 

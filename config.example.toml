@@ -72,6 +72,7 @@ matrix_trail = 10
 matrix_color = "green"
 
 # ── Rain (only when effect = "rain") ──────────────────────────────────
+# Same semantics as matrix: speed is a frame divisor (higher = slower).
 rain_speed = 2
 rain_density = 0.25
 rain_trail = 8
@@ -88,6 +89,7 @@ stars_color = "multi"
 # ── Fire (only when effect = "fire") ──────────────────────────────────
 # intensity: 0-100, how much fuel/heat is fed at the bottom.
 fire_intensity = 80
+# speed is a frame divisor; higher = slower.
 fire_speed = 2
 
 # ── Bubbles (only when effect = "bubbles") ────────────────────────────
@@ -99,7 +101,7 @@ bubble_color = "cyan"
 
 # ── Orbs (only when effect = "orbs") ──────────────────────────────────
 # count: 2-4 evenly spaced blobs that expand and contract slowly.
-# speed: 1-4. min_size/max_size are radii in character cells.
+# speed: 1-4; higher = faster. min_size/max_size are radii in character cells.
 # color: multi, or green/cyan/blue/purple/magenta/red/yellow/white.
 orb_count = 3
 orb_speed = 1
@@ -108,6 +110,7 @@ orb_max_size = 10
 orb_color = "purple"
 
 # ── Plasma (only when effect = "plasma") ──────────────────────────────
+# speed: 1-4; higher = faster.
 plasma_speed = 1
 # plasma_scale: 0.1-5.0; higher makes the waves tighter.
 plasma_scale = 1.0

@@ -172,14 +172,14 @@ cp config.example.toml ~/.config/piperfetch/config.toml
 - `effect` chooses **one** effect. Only the block for that effect is used;
   settings for other effects are ignored.
 - `fps` is the **master animation clock** and applies to every effect.
-- Each effect's `*_speed` is a frame divisor:
-  `effective steps per second = fps / speed`.
+- `matrix_speed`, `rain_speed`, `fire_speed`, and `bubble_speed` are frame
+  divisors: `effective steps per second = fps / speed`. Higher = slower.
   For example `fps = 38` with `matrix_speed = 2` advances matrix columns about
   19 times per second.
 - `matrix_density` is the fraction of columns that participate (`0.0–1.0`);
   `matrix_trail` is the length behind each bright head.
-- `stars_speed` controls how often a few stars twinkle; stars stay in place.
-- `orb_speed` controls the orbs' expansion/contraction cycle;
+- `stars_speed` is a twinkle interval; higher = calmer. Stars stay in place.
+- `orb_speed` and `plasma_speed` scale their per-frame phase; higher = faster.
   `orb_min_size` / `orb_max_size` are radii in cells.
 - `max_width` / `max_height` are **pixel** caps; with `autosize = false`,
   `width` / `height` are character-cell sizes.
@@ -290,29 +290,29 @@ Only the selected effect's keys matter.
 
 | Key | Default | Accepted values | Used by |
 | --- | --- | --- | --- |
-| `matrix_speed` | `2` | integer 1–4 | matrix |
-| `matrix_density` | `0.35` | number 0.0–1.0 | matrix |
-| `matrix_trail` | `10` | integer 2–40 | matrix |
+| `matrix_speed` | `2` | integer 1–4 | matrix; higher = slower |
+| `matrix_density` | `0.35` | number 0.0–1.0 | matrix; fraction of active columns |
+| `matrix_trail` | `10` | integer 2–40 | matrix; trail length in cells |
 | `matrix_color` | `"green"` | effect colour name | matrix |
-| `rain_speed` | `2` | integer 1–4 | rain |
-| `rain_density` | `0.25` | number 0.0–1.0 | rain |
-| `rain_trail` | `8` | integer 2–40 | rain |
+| `rain_speed` | `2` | integer 1–4 | rain; higher = slower |
+| `rain_density` | `0.25` | number 0.0–1.0 | rain; fraction of active columns |
+| `rain_trail` | `8` | integer 2–40 | rain; trail length in cells |
 | `rain_color` | `"cyan"` | effect colour name | rain |
-| `stars_density` | `3` | integer 0–100 | stars |
-| `stars_speed` | `2` | integer 1–4 | stars |
+| `stars_density` | `3` | integer 0–100 | stars; percentage of cells |
+| `stars_speed` | `2` | integer 1–4 | stars; higher = calmer |
 | `stars_color` | `"multi"` | `"multi"` or an effect colour name | stars |
-| `fire_intensity` | `80` | integer 0–100 | fire |
-| `fire_speed` | `2` | integer 1–4 | fire |
-| `bubble_density` | `2` | integer 0–100 | bubbles |
-| `bubble_speed` | `6` | integer 1–12 | bubbles |
+| `fire_intensity` | `80` | integer 0–100 | fire; fuel/heat amount |
+| `fire_speed` | `2` | integer 1–4 | fire; higher = slower |
+| `bubble_density` | `2` | integer 0–100 | bubbles; percentage of cells |
+| `bubble_speed` | `6` | integer 1–12 | bubbles; higher = slower |
 | `bubble_color` | `"cyan"` | effect colour name | bubbles |
-| `orb_count` | `3` | integer 2–4 | orbs |
-| `orb_speed` | `1` | integer 1–4 | orbs |
-| `orb_min_size` | `4` | integer 1–30 | orbs |
-| `orb_max_size` | `10` | integer 2–40 | orbs |
+| `orb_count` | `3` | integer 2–4 | orbs; evenly spaced |
+| `orb_speed` | `1` | integer 1–4 | orbs; higher = faster |
+| `orb_min_size` | `4` | integer 1–30 | orbs; radius in cells |
+| `orb_max_size` | `10` | integer 2–40 | orbs; radius in cells |
 | `orb_color` | `"purple"` | `"multi"` or an effect colour name | orbs |
-| `plasma_speed` | `1` | integer 1–4 | plasma |
-| `plasma_scale` | `1.0` | number 0.1–5.0 | plasma |
+| `plasma_speed` | `1` | integer 1–4 | plasma; higher = faster |
+| `plasma_scale` | `1.0` | number 0.1–5.0 | plasma; higher = tighter waves |
 
 Effect colour names are `green`, `cyan`, `blue`, `purple`, `magenta`, `red`,
 `yellow`, and `white`. These keys do not accept hex values; use the named
@@ -462,12 +462,22 @@ default.
 - `demos/` — one preview GIF per effect
 - `demos/clock-size-*.gif` — clock size showcases
 - `demos/piperfetch-showcase.mp4` — 30-second feature showcase
+- `tests/test_config_keys.py` — config-key regression checks
 - `CHANGELOG.md` — release history
 - `LICENSE` — MIT
 - `README.md` — this file
 
 Runtime state (the animation PID) is kept in
 `$XDG_RUNTIME_DIR/piperfetch-<shell-pid>.pid` and is cleaned up automatically.
+
+## Testing
+
+```bash
+python3 tests/test_config_keys.py
+```
+
+The script checks that every config key changes the layout, style, label, or
+effect path it belongs to.
 
 ## Uninstall
 
