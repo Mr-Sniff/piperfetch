@@ -15,6 +15,9 @@ import getpass
 import configparser
 import copy
 import fcntl
+import select
+import termios
+import tty
 import json
 import math
 import os
@@ -363,6 +366,69 @@ def apply_style(cfg: dict) -> None:
     VALUE = color_code(cfg["value_color"], cfg["value_bold"])
     BORDER = color_code(cfg["border_color"], True)
     CLOCK_COLOR = color_code(cfg["clock_color"], True)
+
+
+def layout_state_path(pidfile: Path) -> Path:
+    return pidfile.with_suffix(".state")
+
+
+def write_layout_state(pidfile: Path, box_h: int) -> None:
+    state = layout_state_path(pidfile)
+    try:
+        temp = Path(str(state) + ".tmp")
+        temp.write_text(f"{box_h}\n{Path(__file__).resolve()}\n")
+        temp.replace(state)
+    except OSError:
+        pass
+
+
+def clear_layout_state(pidfile: Path) -> None:
+    state = layout_state_path(pidfile)
+    for path in (state, Path(str(state) + ".tmp")):
+        try:
+            path.unlink()
+        except OSError:
+            pass
+
+
+def tty_cursor_position() -> tuple[int | None, int | None]:
+    try:
+        fd = os.open("/dev/tty", os.O_RDWR | os.O_NOCTTY)
+    except OSError:
+        return None, None
+    try:
+        rows = os.get_terminal_size(fd).lines
+        old = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            os.write(fd, b"\x1b[6n")
+            data = b""
+            deadline = time.monotonic() + 0.25
+            while time.monotonic() < deadline:
+                ready, _, _ = select.select([fd], [], [], 0.02)
+                if ready:
+                    data += os.read(fd, 64)
+                    if b"R" in data:
+                        break
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old)
+    except OSError:
+        return None, None
+    finally:
+        os.close(fd)
+    match = re.search(rb"\x1b\[(\d+);(\d+)R", data)
+    return (int(match.group(1)) if match else None), rows
+
+
+def prompt_check(state_path: str) -> str:
+    try:
+        box_h = int(Path(state_path).read_text().splitlines()[0])
+    except (OSError, ValueError, IndexError):
+        return "stop"
+    row, rows = tty_cursor_position()
+    if row is None or rows is None:
+        return "stop"
+    return "resume" if box_h + 1 < row < rows else "stop"
 
 
 def terminal_geometry() -> tuple[int, int, int, int]:
@@ -1571,6 +1637,7 @@ def animate(
 
     width = box_w - 2
     height = box_h - 2
+    write_layout_state(pidfile, box_h)
     frame_time = 1.0 / max(1, cfg["fps"])
     if width <= 2 or height <= 2:
         return
@@ -1625,6 +1692,7 @@ def animate(
                     if new_layout is None:
                         # No room for the dashboard any more: turn the terminal
                         # back into a normal shell.
+                        clear_layout_state(pidfile)
                         out = ["\x1b7"]
                         for row in range(1, box_h + 1):
                             out.append(f"\x1b[{row};1H\x1b[2K")
@@ -1638,6 +1706,7 @@ def animate(
                     box_w, box_h, box_x = new_layout
                     width = box_w - 2
                     height = box_h - 2
+                    write_layout_state(pidfile, box_h)
                     effect = make_effect(cfg, width, height)
                     # A size change makes the terminal reflow the old layout.
                     # Clear and redraw everything once, then ask fish to
@@ -1686,6 +1755,7 @@ def animate(
         try:
             if pidfile.read_text().strip() == str(os.getpid()):
                 pidfile.unlink()
+                clear_layout_state(pidfile)
         except OSError:
             pass
 
@@ -1800,11 +1870,17 @@ def usage() -> str:
         "  --info          print the information block only\n"
         "  --list-effects  list available animations\n"
         "  --check-config  print the effective configuration\n"
+        "  --prompt-check PATH  internal: report whether the dashboard is visible\n"
         "  --version       print the version\n"
     )
 
 
 def main() -> None:
+    state_arg = cli_value("--prompt-check")
+    if state_arg:
+        print(prompt_check(state_arg))
+        return
+
     if "--help" in sys.argv or "-h" in sys.argv:
         print(usage())
         return
@@ -1960,6 +2036,7 @@ def main() -> None:
             Path(str(pidfile) + suffix).unlink()
         except OSError:
             pass
+    clear_layout_state(pidfile)
 
     try:
         child = os.fork()
@@ -1975,6 +2052,7 @@ def main() -> None:
     elif child > 0:
         try:
             pidfile.write_text(f"{child}\n")
+            write_layout_state(pidfile, box_h)
         except OSError:
             pass
 

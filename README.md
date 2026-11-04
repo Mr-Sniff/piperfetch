@@ -61,14 +61,23 @@ and `:` for the block clocks; other formats use the one-line clock.
 
 ## How it behaves
 
-The dashboard sits at the top until you run a command. That means:
+The dashboard sits at the top of the terminal until it is scrolled away.
+That means:
 
 - the prompt is available immediately;
 - typing works normally;
 - the selected effect keeps animating while you are at the prompt;
-- when a command starts, the animation stops so its output can scroll the
-  dashboard up naturally; a long output pushes it out of sight;
+- when a command starts, the animation pauses so command output is never
+  drawn over;
+- when the prompt returns, it resumes unless output has reached the bottom of
+  the screen;
+- once the prompt is at the bottom row, the dashboard has been scrolled and
+  the animation is retired;
 - `clear` / Ctrl-L removes the dashboard and returns to a normal shell.
+
+The visibility check uses the terminal's cursor position report (`DSR 6`).
+If the terminal does not answer it, the animation is retired at the next
+prompt; the dashboard itself still works.
 
 ## Requirements
 
@@ -76,6 +85,9 @@ The dashboard sits at the top until you run a command. That means:
 - a Linux/Unix terminal that supports `ESC 7` / `ESC 8` cursor save/restore;
   Kitty is recommended
 - **fish, zsh, or bash** for the shell integration (fish is the most tested)
+- optional: a terminal that answers `DSR 6` (`ESC[6n`) so the animation can
+  resume after short commands; without it the animation stops at the next
+  prompt
 - optional: `niri`, `hyprctl`, `swaymsg`, `wlr-randr`, `xrandr`, `lscpu`,
   `lspci`, `ip`, `gsettings`, `kitty`, `fish` for the corresponding
   information lines. Missing commands simply hide their module.
@@ -92,7 +104,7 @@ cd piperfetch
 mkdir -p ~/.config/piperfetch
 cp config.example.toml ~/.config/piperfetch/config.toml
 
-# fish hooks (stops the animation when a command starts)
+# fish hooks (pause the animation while a command runs)
 mkdir -p ~/.config/fish/conf.d
 cp fish/piperfetch.fish ~/.config/fish/conf.d/piperfetch.fish
 ```
@@ -225,44 +237,111 @@ short names (for example `System`, `Processor`, `Graphics`, `Root Disk`, and
 
 ### Key reference
 
-| Key | Values | Notes |
-| --- | --- | --- |
-| `specs` | `true` / `false` | Show the system info block |
-| `autosize` | `true` / `false` | Grow with the terminal |
-| `width`, `height` | cells | Used when `autosize = false` |
-| `max_width`, `max_height` | pixels (`0` = off) | Cap the box |
-| `align` | `left`, `center`, `right` | Horizontal placement |
-| `shell_rows` | rows | Space below the box when specs are off |
-| `title_color`, `separator_color` | colour | Title and rule |
-| `key_color`, `value_color` | colour | Field names and values |
-| `border_color`, `clock_color` | colour | Box border and clock |
-| `title_bold`, `key_bold`, `value_bold` | `true` / `false` | Font weights |
-| `labels` | `[labels]` table | Rename individual fields |
-| `effect` | `pipes`, `matrix`, `rain`, `stars`, `fire`, `bubbles`, `orbs`, `plasma`, `none` | Select one animation |
-| `fps` | `1–240` | Master frame rate |
-| `pipe_type` | `0–9` | Pipes glyph style |
-| `pipe_colors` | `"1,2,3,4,5,6,7"` | ANSI foreground colors 1–7 |
-| `matrix_speed`, `rain_speed` | `1–4` | Frame divisor; higher = slower |
-| `matrix_density`, `rain_density` | `0.0–1.0` | Fraction of active columns |
-| `matrix_trail`, `rain_trail` | `2–40` | Trail length in cells |
-| `matrix_color`, `rain_color` | colour name | `green`, `cyan`, etc. |
-| `stars_density` | `0–100` | Percentage of stars |
-| `stars_speed` | `1–4` | Twinkle interval; higher = calmer |
-| `stars_color` | `multi` or colour | Star colour |
-| `fire_intensity` | `0–100` | Fuel/heat amount |
-| `fire_speed` | `1–4` | Frame divisor |
-| `bubble_density` | `0–100` | Percentage of bubbles |
-| `bubble_speed` | `1–12` | Frame divisor; higher = slower |
-| `bubble_color` | colour name | Bubble colour |
-| `orb_count` | `2–4` | Number of orbs |
-| `orb_speed` | `1–4` | Expansion speed |
-| `orb_min_size`, `orb_max_size` | cells | Orb radii |
-| `orb_color` | `multi` or colour | Orb colour |
-| `plasma_speed` | `1–4` | Frame divisor |
-| `plasma_scale` | `0.1–5.0` | Wave tightness |
-| `clock` | `true` / `false` | Show the clock |
-| `clock_size` | `1–3` | 1 text, 2 three-row, 3 five-row |
-| `clock_format` | `strftime` | e.g. `%H:%M:%S` |
+Every setting lives in one TOML file. Values outside the ranges below are
+ignored, so the default is kept. The file is read once at startup.
+
+#### Layout
+
+| Key | Default | Accepted values | Notes |
+| --- | --- | --- | --- |
+| `specs` | `true` | `true` / `false` | Show the information block |
+| `autosize` | `true` | `true` / `false` | Grow the box with the terminal |
+| `width` | `54` | integer ≥ 1 | Box width in cells; used when `autosize = false` |
+| `height` | `22` | integer ≥ 1 | Box height in cells; used when `autosize = false` |
+| `max_width` | `0` | integer ≥ 0 | Pixel cap; `0` = off; needs terminal pixel size |
+| `max_height` | `0` | integer ≥ 0 | Pixel cap; `0` = off; needs terminal pixel size |
+| `align` | `"left"` | `"left"`, `"center"`, `"right"` | Horizontal placement |
+| `shell_rows` | `8` | integer ≥ 0 | Rows kept below the box when specs are off |
+
+#### Spec-sheet styling
+
+Colours accept an ANSI name (`black`, `red`, `green`, `yellow`, `blue`,
+`magenta`, `cyan`, `white`, `default`, or any `bright_*` variant), a
+`#RRGGBB` value, a terminal colour index from `0` to `255`, or `caret`
+(reads the Kitty cursor colour; falls back to `#FFDF80`).
+
+| Key | Default | Accepted values | Notes |
+| --- | --- | --- | --- |
+| `title_color` | `"green"` | colour | Name and rule colour |
+| `separator_color` | `"green"` | colour | Underline below the title |
+| `key_color` | `"cyan"` | colour | Field names |
+| `value_color` | `"default"` | colour | Field values |
+| `border_color` | `"white"` | colour | Box border |
+| `clock_color` | `"white"` | colour | Clock digits |
+| `title_bold` | `true` | `true` / `false` | Bold title and separator |
+| `key_bold` | `true` | `true` / `false` | Bold field names |
+| `value_bold` | `false` | `true` / `false` | Bold field values |
+| `labels` | see below | `[labels]` table | Rename individual fields |
+
+#### Animation
+
+| Key | Default | Accepted values | Notes |
+| --- | --- | --- | --- |
+| `effect` | `"pipes"` | `"pipes"`, `"matrix"`, `"rain"`, `"stars"`, `"fire"`, `"bubbles"`, `"orbs"`, `"plasma"`, `"none"` | Select exactly one effect |
+| `fps` | `38` | integer 1–240 | Master frame rate for every effect |
+| `pipe_type` | `1` | integer 0–9 | Pipes glyph set; see below |
+| `pipe_colors` | `"1,2,3,4,5,6,7"` | comma string or array of integers 1–7 | ANSI foreground colours; `0` (black) is excluded |
+
+`pipe_type` values: `0` heavy box, `1` rounded, `2` light box, `3` double,
+`4` ASCII `+`, `5` slashes, `6` dots, `7` circles, `8` railway, `9` mixed.
+Only the selected effect's keys matter.
+
+#### Per-effect settings
+
+| Key | Default | Accepted values | Used by |
+| --- | --- | --- | --- |
+| `matrix_speed` | `2` | integer 1–4 | matrix |
+| `matrix_density` | `0.35` | number 0.0–1.0 | matrix |
+| `matrix_trail` | `10` | integer 2–40 | matrix |
+| `matrix_color` | `"green"` | effect colour name | matrix |
+| `rain_speed` | `2` | integer 1–4 | rain |
+| `rain_density` | `0.25` | number 0.0–1.0 | rain |
+| `rain_trail` | `8` | integer 2–40 | rain |
+| `rain_color` | `"cyan"` | effect colour name | rain |
+| `stars_density` | `3` | integer 0–100 | stars |
+| `stars_speed` | `2` | integer 1–4 | stars |
+| `stars_color` | `"multi"` | `"multi"` or an effect colour name | stars |
+| `fire_intensity` | `80` | integer 0–100 | fire |
+| `fire_speed` | `2` | integer 1–4 | fire |
+| `bubble_density` | `2` | integer 0–100 | bubbles |
+| `bubble_speed` | `6` | integer 1–12 | bubbles |
+| `bubble_color` | `"cyan"` | effect colour name | bubbles |
+| `orb_count` | `3` | integer 2–4 | orbs |
+| `orb_speed` | `1` | integer 1–4 | orbs |
+| `orb_min_size` | `4` | integer 1–30 | orbs |
+| `orb_max_size` | `10` | integer 2–40 | orbs |
+| `orb_color` | `"purple"` | `"multi"` or an effect colour name | orbs |
+| `plasma_speed` | `1` | integer 1–4 | plasma |
+| `plasma_scale` | `1.0` | number 0.1–5.0 | plasma |
+
+Effect colour names are `green`, `cyan`, `blue`, `purple`, `magenta`, `red`,
+`yellow`, and `white`. These keys do not accept hex values; use the named
+colours for effects and the full colour syntax for the spec sheet.
+
+#### Clock
+
+| Key | Default | Accepted values | Notes |
+| --- | --- | --- | --- |
+| `clock` | `false` | `true` / `false` | Show the clock inside the box |
+| `clock_size` | `1` | `1`, `2`, `3` | 1 = one line, 2 = three rows, 3 = five rows |
+| `clock_format` | `"%H:%M:%S"` | `strftime` string | Block clocks need only digits, spaces and `:`; other formats use the one-line clock |
+
+#### Labels
+
+`[labels]` accepts any of these keys; each value is a string:
+
+| Key | Default | Key | Default |
+| --- | --- | --- | --- |
+| `os` | `"System"` | `terminal` | `"Terminal"` |
+| `kernel` | `"Kernel"` | `terminal_font` | `"Terminal Font"` |
+| `uptime` | `"Uptime"` | `cpu` | `"Processor"` |
+| `packages` | `"Packages"` | `gpu` | `"Graphics"` |
+| `shell` | `"Shell"` | `memory` | `"Memory"` |
+| `display` | `"Display"` | `swap` | `"Swap"` |
+| `wm` | `"Compositor"` | `disk` | `"Root Disk"` |
+| `theme` | `"Theme"` | `ip` | `"Network"` |
+| `font` | `"UI Font"` | `locale` | `"Locale"` |
+| `cursor` | `"Cursor"` |  |  |
 
 The box, clock and information block are redrawn when the terminal is resized.
 Resizing clears the visible shell area so reflowed dashboard lines cannot leave
@@ -282,8 +361,10 @@ Shell support:
 - **zsh** — `shell/zsh-piperfetch.zsh`
 - **bash** — `shell/bash-piperfetch.sh` (uses a `DEBUG` trap)
 
-The shell hooks stop the animation when a command starts so output can scroll
-the dashboard away.
+The shell hooks pause the animation while a command runs. When the prompt
+returns, they check the cursor row: above the bottom row the dashboard is
+still on screen and the animation resumes; at the bottom row it has been
+scrolled away and the animation is stopped.
 
 ## Window managers
 
@@ -314,8 +395,10 @@ dashboard, starts the animation, and `exec`s your `$SHELL`.
 The fish side needs the integration in `~/.config/fish/config.fish`:
 
 - `fish_greeting` must be empty, since piperfetch already draws the header.
-- `fish_preexec` stops the animation when a command starts, so the output can
-  scroll the dashboard away.
+- `fish_preexec` pauses the animation when a command starts, so output is
+  never drawn over.
+- the prompt hook resumes it when the dashboard is still visible and retires
+  it once output has scrolled it away.
 - `fish_exit` stops the animation.
 - a `clear` wrapper (and a Ctrl-L binding) kills the animation and clears the
   screen, so the dashboard disappears like a normal fetch logo.

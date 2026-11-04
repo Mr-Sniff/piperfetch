@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- The shell hooks now pause the animation while a command runs, resume it
+  when the dashboard is still visible, and retire it once output has scrolled
+  it away.
+- Expanded the README key reference with every configuration key, its
+  default, and accepted values.
+- Refreshed the README demo GIF with the current spec-sheet styling and fixed
+  the spec-sheet crop in the showcase video.
+
 ## 1.2.0 — 2026-11-04
 
 - Added spec-sheet colour customization for title, separator, field names,
