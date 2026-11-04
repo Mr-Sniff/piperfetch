@@ -194,7 +194,7 @@ shell /absolute/path/to/piperfetch
 ```
 
 Kitty then starts `piperfetch` as the shell program. `piperfetch` draws the
-dashboard, starts the animation, and `exec`s fish.
+dashboard, starts the animation, and `exec`s your `$SHELL`.
 
 The fish side needs the integration in `~/.config/fish/config.fish`:
 
@@ -264,7 +264,7 @@ default.
 - `README.md` — this file
 
 Runtime state (the animation PID) is kept in
-`$XDG_RUNTIME_DIR/piperfetch-<fish-pid>.pid` and is cleaned up automatically.
+`$XDG_RUNTIME_DIR/piperfetch-<shell-pid>.pid` and is cleaned up automatically.
 
 ## Uninstall
 
