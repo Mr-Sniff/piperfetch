@@ -1,34 +1,91 @@
-# Copy this to ~/.config/piperfetch/config.toml and edit as needed.
+# ══════════════════════════════════════════════════════════════════════
+# piperfetch configuration
+#
+# The file is read once at startup; open a new terminal or run piperfetch
+# again after editing it.
+#
+# LAYOUT
+#   specs      show the system information block on the right
+#   autosize   let the pipe box grow with the terminal
+#   width/height  used only when autosize = false (in character cells)
+#   max_width/max_height  pixel caps for the pipe box (0 = no cap)
+#   align      "left", "center" or "right"
+#   shell_rows rows kept below the box when specs are off and autosize is on
+#
+# ANIMATION
+#   effect     selects exactly one effect; only that effect's block is used
+#   fps        master frame rate for every effect (1-240)
+#
+#   Per-effect speed values are frame divisors.  effective speed =
+#   fps / effect_speed.  For example, fps = 38 and matrix_speed = 2 means
+#   the matrix columns advance about 19 times per second.
+# ══════════════════════════════════════════════════════════════════════
 
-# Show the system information block on the right.
+# ── Layout ────────────────────────────────────────────────────────────
 specs = true
-
-# Let the pipe box grow with the terminal.
-# When false, width/height are used (in character cells).
 autosize = true
 width = 54
 height = 22
-
-# Maximum pipe-box size in pixels (0 = no limit).
 max_width = 0
 max_height = 0
-
-# Horizontal placement when the box is narrower than the terminal:
-# "left", "center" or "right".
 align = "left"
+shell_rows = 8
 
-# Animation: pipes, matrix, rain, stars, none.
+# ── Animation ─────────────────────────────────────────────────────────
+# pipes | matrix | rain | stars | fire | bubbles | plasma | none
 effect = "pipes"
 
-# Bold clock in the middle of the box; pipes are drawn behind it.
-clock = false
-# 1 = normal text, 2 = 3-row clock, 3 = 5-row large clock.
-clock_size = 1
-clock_format = "%H:%M:%S"
-
-# Pipe animation speed in frames per second (1-240).
-# Lower is slower; pipes.sh's default is 75, piperfetch's default is 38.
+# Master clock shared by every effect.
 fps = 38
 
-# Rows kept free below the box when specs are off and autosize is on.
-shell_rows = 8
+# ── Pipes (only when effect = "pipes") ────────────────────────────────
+# pipe_type: 0-9. 0 = heavy box, 1 = rounded (default), 4 = ASCII +,
+# 8 = railway.
+pipe_type = 1
+# Comma-separated ANSI colors 1-7. Black (0) is intentionally excluded.
+pipe_colors = "1,2,3,4,5,6,7"
+
+# ── Matrix (only when effect = "matrix") ──────────────────────────────
+# speed: advance a column every N frames (1 = fastest, 4 = slowest).
+# density: fraction of columns active (0.0-1.0).
+# trail: length behind the bright head, in cells.
+# color: green, cyan, blue, purple, magenta, red, yellow, white.
+matrix_speed = 1
+matrix_density = 0.45
+matrix_trail = 10
+matrix_color = "green"
+
+# ── Rain (only when effect = "rain") ──────────────────────────────────
+rain_speed = 1
+rain_density = 0.25
+rain_trail = 8
+rain_color = "cyan"
+
+# ── Stars (only when effect = "stars") ────────────────────────────────
+# density is a percentage of cells (0-100).
+# color: multi, or green/cyan/blue/purple/magenta/red/yellow/white.
+stars_density = 2
+stars_speed = 1
+stars_color = "multi"
+
+# ── Fire (only when effect = "fire") ──────────────────────────────────
+# intensity: 0-100, how much fuel/heat is fed at the bottom.
+fire_intensity = 80
+fire_speed = 1
+
+# ── Bubbles (only when effect = "bubbles") ────────────────────────────
+# density is a percentage of cells (0-100).
+bubble_density = 2
+bubble_speed = 1
+bubble_color = "cyan"
+
+# ── Plasma (only when effect = "plasma") ──────────────────────────────
+plasma_speed = 1
+# plasma_scale: 0.1-5.0; higher makes the waves tighter.
+plasma_scale = 1.0
+
+# ── Clock ─────────────────────────────────────────────────────────────
+clock = false
+# 1 = one-line text, 2 = 3-row half-block clock, 3 = 5-row block clock.
+clock_size = 1
+clock_format = "%H:%M:%S"

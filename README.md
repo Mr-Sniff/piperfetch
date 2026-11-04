@@ -1,7 +1,7 @@
 # piperfetch
 
 A small, self-contained fastfetch-style terminal dashboard with live
-animations: classic pipes, Matrix rain, blue rain, or a starfield.
+animations: pipes, Matrix rain, blue rain, stars, fire, bubbles, or plasma.
 
 ![piperfetch demo](demo.gif)
 
@@ -80,60 +80,73 @@ Restart Kitty or open a new window.
 ## Run it
 
 ```bash
-./piperfetch          # dashboard + exec your $SHELL
-./piperfetch --demo   # sanitized demo layout for screenshots
-./piperfetch --info   # print the information block only
+./piperfetch                    # dashboard + exec your $SHELL
+./piperfetch --config PATH      # use an alternate config file
+./piperfetch --demo             # sanitized demo layout for screenshots
+./piperfetch --info             # print the information block only
+./piperfetch --list-effects     # list available animations
+./piperfetch --check-config     # print the effective configuration
 ./piperfetch --version
 ```
 
 ## Configuration
 
-`~/.config/piperfetch/config.toml`:
+The fully commented example is in `config.example.toml`. Copy it to
+`~/.config/piperfetch/config.toml` and edit it.
 
-```toml
-# Show the system information block on the right.
-specs = false
-
-# Let the pipe box grow with the terminal.
-# When false, width/height are used (in character cells).
-autosize = true
-width = 54
-height = 22
-
-# Maximum pipe-box size in pixels (0 = no limit).
-max_width = 700
-max_height = 700
-
-# Horizontal placement when the box is narrower than the terminal:
-# "left", "center" or "right".
-align = "center"
-
-# Animation: pipes, matrix, rain, stars, none.
-effect = "pipes"
-
-# Bold clock in the middle of the box; pipes are drawn behind it.
-clock = true
-# 1 = normal text, 2 = 3-row clock, 3 = 5-row large clock.
-clock_size = 3
-clock_format = "%H:%M:%S"
-
-# Pipe animation speed in frames per second (1-240).
-# Lower is slower; pipes.sh's default is 75, piperfetch's default is 38.
-fps = 38
-
-# Rows kept free below the box when specs are off and autosize is on.
-shell_rows = 8
+```bash
+mkdir -p ~/.config/piperfetch
+cp config.example.toml ~/.config/piperfetch/config.toml
 ```
 
-With `specs = false` and `autosize = true`, the pipe box uses the full terminal
-width and `terminal_rows - shell_rows` rows. With `specs = true`, autosize uses
-the information block's width and height instead. With `autosize = false`, the
-box uses exactly `width` x `height`.
+### How the settings combine
 
-`clock_size = 1` is the one-line text clock, `2` is a 3-row clock, and `3` is a
-5-row clock. `fps` controls the pipe speed (default 38; lower is slower). Big
-clock sizes work with numeric formats such as `%H:%M:%S`; other formats fall
-back to the one-line clock.
+- `effect` chooses **one** effect. Only the block for that effect is used;
+  settings for other effects are ignored.
+- `fps` is the **master animation clock** and applies to every effect.
+- Each effect's `*_speed` is a frame divisor:
+  `effective steps per second = fps / speed`.
+  For example `fps = 38` with `matrix_speed = 2` advances matrix columns about
+  19 times per second.
+- `matrix_density` is the fraction of columns that participate (`0.0–1.0`);
+  `matrix_trail` is the length behind each bright head.
+- `max_width` / `max_height` are **pixel** caps; with `autosize = false`,
+  `width` / `height` are character-cell sizes.
+- `specs = false` hides the information block; `shell_rows` then controls how
+  much room is left below the box.
+- `clock` is independent of the effect; the clock is drawn above the effect.
+
+### Key reference
+
+| Key | Values | Notes |
+| --- | --- | --- |
+| `specs` | `true` / `false` | Show the system info block |
+| `autosize` | `true` / `false` | Grow with the terminal |
+| `width`, `height` | cells | Used when `autosize = false` |
+| `max_width`, `max_height` | pixels (`0` = off) | Cap the box |
+| `align` | `left`, `center`, `right` | Horizontal placement |
+| `shell_rows` | rows | Space below the box when specs are off |
+| `effect` | `pipes`, `matrix`, `rain`, `stars`, `fire`, `bubbles`, `plasma`, `none` | Select one animation |
+| `fps` | `1–240` | Master frame rate |
+| `pipe_type` | `0–9` | Pipes glyph style |
+| `pipe_colors` | `"1,2,3,4,5,6,7"` | ANSI foreground colors 1–7 |
+| `matrix_speed`, `rain_speed` | `1–4` | Frame divisor; higher = slower |
+| `matrix_density`, `rain_density` | `0.0–1.0` | Fraction of active columns |
+| `matrix_trail`, `rain_trail` | `2–40` | Trail length in cells |
+| `matrix_color`, `rain_color` | colour name | `green`, `cyan`, etc. |
+| `stars_density` | `0–100` | Percentage of stars |
+| `stars_speed` | `1–4` | Star movement step |
+| `stars_color` | `multi` or colour | Star colour |
+| `fire_intensity` | `0–100` | Fuel/heat amount |
+| `fire_speed` | `1–4` | Frame divisor |
+| `bubble_density` | `0–100` | Percentage of bubbles |
+| `bubble_speed` | `1–4` | Rise step |
+| `bubble_color` | colour name | Bubble colour |
+| `plasma_speed` | `1–4` | Frame divisor |
+| `plasma_scale` | `0.1–5.0` | Wave tightness |
+| `clock` | `true` / `false` | Show the clock |
+| `clock_size` | `1–3` | 1 text, 2 three-row, 3 five-row |
+| `clock_format` | `strftime` | e.g. `%H:%M:%S` |
 
 The box, clock and information block are redrawn when the terminal is resized.
 Resizing clears the visible shell area so reflowed dashboard lines cannot leave
@@ -149,6 +162,9 @@ Set `effect` in the config to choose the animation:
 | `matrix` | Green falling glyphs |
 | `rain` | Blue falling drops |
 | `stars` | A drifting starfield |
+| `fire` | Flames rising from the bottom |
+| `bubbles` | Bubbles drifting upward |
+| `plasma` | Slow multicolour plasma waves |
 | `none` | No animation; clock and border only |
 
 The clock and border work with every effect.
@@ -256,11 +272,13 @@ default.
 ## Files
 
 - `piperfetch` — the whole program (stdlib only)
-- `config.example.toml` — configuration example
+- `config.example.toml` — fully commented configuration example
 - `fish/piperfetch.fish` — fish hooks
 - `shell/bash-piperfetch.sh` — bash hooks
 - `shell/zsh-piperfetch.zsh` — zsh hooks
 - `demo.gif` — animated demo
+- `CHANGELOG.md` — release history
+- `LICENSE` — MIT
 - `README.md` — this file
 
 Runtime state (the animation PID) is kept in
@@ -270,3 +288,7 @@ Runtime state (the animation PID) is kept in
 
 Remove the `shell` line from `kitty.conf`, restore a `fish_greeting` if desired,
 and delete this directory.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
