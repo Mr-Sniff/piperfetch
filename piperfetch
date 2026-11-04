@@ -1794,6 +1794,7 @@ def usage() -> str:
         "Usage: piperfetch [OPTIONS]\n\n"
         "  --config PATH   use an alternate config file\n"
         "  --demo          sanitized demo layout\n"
+        "  --demo-spec     sanitized spec sheet with your current style\n"
         "  --demo-effect E render only effect E for preview captures\n"
         "  --demo-clock N  render clock size N for preview captures\n"
         "  --info          print the information block only\n"
@@ -1838,6 +1839,7 @@ def main() -> None:
         return
 
     demo = "--demo" in sys.argv
+    demo_spec = "--demo-spec" in sys.argv
     demo_effect = cli_value("--demo-effect")
     if demo_effect not in EFFECTS:
         demo_effect = None
@@ -1849,7 +1851,22 @@ def main() -> None:
     if demo_clock not in (1, 2, 3):
         demo_clock = None
     try:
-        if demo_clock:
+        if demo_spec:
+            cfg = load_config(config_override)
+            cfg.update(
+                specs=True,
+                autosize=True,
+                max_width=900,
+                max_height=700,
+                align="left",
+                clock=True,
+                clock_size=2,
+            )
+            apply_style(cfg)
+            info = demo_info(cfg["labels"])
+            info_width = max(visible_width(line) for line in info)
+            info_height = len(info)
+        elif demo_clock:
             cfg = copy.deepcopy(CONFIG_DEFAULTS)
             cfg.update(
                 specs=False,
@@ -1961,7 +1978,7 @@ def main() -> None:
         except OSError:
             pass
 
-    if demo_effect or demo_clock:
+    if demo_effect or demo_clock or demo_spec:
         sys.stdout.write("\x1b[?25l")
         sys.stdout.flush()
         try:

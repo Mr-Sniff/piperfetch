@@ -10,6 +10,8 @@
 - Added a `[labels]` config table for renaming every information field.
 - Renamed default fields to clearer names such as `System`, `Processor`,
   `Graphics`, `Root Disk`, `Network`, and `Compositor`.
+- Added a 30-second showcase video under `demos/` and a `--demo-spec` mode
+  for clean spec-sheet preview captures.
 
 ## 1.1.0 — 2026-11-04
 

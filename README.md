@@ -6,6 +6,9 @@ plasma. The spec sheet has customizable colours, weights, and field names.
 
 ![piperfetch demo](demo.gif)
 
+**[▶ Watch the 30-second showcase](demos/piperfetch-showcase.mp4)** — effects,
+clock sizes, spec-sheet colours, labels, and layout.
+
 ## Effects
 
 Set `effect` in the config to choose the animation:
@@ -375,6 +378,7 @@ default.
 - `demo.gif` — full-layout animated demo
 - `demos/` — one preview GIF per effect
 - `demos/clock-size-*.gif` — clock size showcases
+- `demos/piperfetch-showcase.mp4` — 30-second feature showcase
 - `CHANGELOG.md` — release history
 - `LICENSE` — MIT
 - `README.md` — this file
