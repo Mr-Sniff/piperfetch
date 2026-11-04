@@ -119,8 +119,8 @@ CONFIG_DEFAULTS = {
     # orbs
     "orb_count": 3,
     "orb_speed": 1,
-    "orb_min_size": 3,
-    "orb_max_size": 8,
+    "orb_min_size": 4,
+    "orb_max_size": 10,
     "orb_color": "purple",
     # plasma
     "plasma_speed": 1,
@@ -1113,6 +1113,10 @@ class OrbsEffect:
         min_size = min(cfg["orb_min_size"], max_size)
         self.min_size = max(1.0, float(min_size))
         self.max_size = max(self.min_size + 0.5, float(max_size))
+        self.margin_x = min(self.max_size, max(0.0, (width - 1) / 2))
+        self.margin_y = min(
+            self.max_size / 2.2, max(0.0, (height - 1) / 2)
+        )
         if cfg["orb_color"] == "multi":
             palettes = list(COLOR_SCHEMES.values())
         else:
@@ -1121,8 +1125,14 @@ class OrbsEffect:
         for _ in range(cfg["orb_count"]):
             head, tail = random.choice(palettes)
             self.orbs.append({
-                "x": random.uniform(0, max(0, width - 1)),
-                "y": random.uniform(0, max(0, height - 1)),
+                "x": random.uniform(
+                    self.margin_x,
+                    max(self.margin_x, width - 1 - self.margin_x),
+                ),
+                "y": random.uniform(
+                    self.margin_y,
+                    max(self.margin_y, height - 1 - self.margin_y),
+                ),
                 "vx": random.choice((-1, 1)) * random.uniform(0.01, 0.035),
                 "vy": random.choice((-1, 1)) * random.uniform(0.01, 0.035),
                 "phase": random.uniform(0, math.tau),
@@ -1140,12 +1150,14 @@ class OrbsEffect:
             orb["radius"] = radius
             orb["x"] += orb["vx"] * self.speed
             orb["y"] += orb["vy"] * self.speed
-            if orb["x"] < 0 or orb["x"] > self.width - 1:
+            x_hi = max(self.margin_x, self.width - 1 - self.margin_x)
+            y_hi = max(self.margin_y, self.height - 1 - self.margin_y)
+            if orb["x"] < self.margin_x or orb["x"] > x_hi:
                 orb["vx"] *= -1
-                orb["x"] = max(0, min(self.width - 1, orb["x"]))
-            if orb["y"] < 0 or orb["y"] > self.height - 1:
+                orb["x"] = max(self.margin_x, min(x_hi, orb["x"]))
+            if orb["y"] < self.margin_y or orb["y"] > y_hi:
                 orb["vy"] *= -1
-                orb["y"] = max(0, min(self.height - 1, orb["y"]))
+                orb["y"] = max(self.margin_y, min(y_hi, orb["y"]))
 
         out = []
         for y in range(self.height):
@@ -1153,7 +1165,7 @@ class OrbsEffect:
                 best = None
                 for orb in self.orbs:
                     dx = (x + 0.5) - orb["x"]
-                    dy = ((y + 0.5) - orb["y"]) * 0.55
+                    dy = ((y + 0.5) - orb["y"]) * 2.2
                     ratio = math.hypot(dx, dy) / orb["radius"]
                     if ratio < 1.0 and (best is None or ratio < best[0]):
                         best = (ratio, orb)
@@ -1667,6 +1679,7 @@ def usage() -> str:
         "Usage: piperfetch [OPTIONS]\n\n"
         "  --config PATH   use an alternate config file\n"
         "  --demo          sanitized demo layout\n"
+        "  --demo-effect E render only effect E for preview captures\n"
         "  --info          print the information block only\n"
         "  --list-effects  list available animations\n"
         "  --check-config  print the effective configuration\n"
@@ -1705,8 +1718,25 @@ def main() -> None:
         return
 
     demo = "--demo" in sys.argv
+    demo_effect = cli_value("--demo-effect")
+    if demo_effect not in EFFECTS:
+        demo_effect = None
     try:
-        if demo:
+        if demo_effect:
+            cfg = dict(CONFIG_DEFAULTS)
+            cfg.update(
+                specs=False,
+                autosize=True,
+                max_width=900,
+                max_height=700,
+                align="left",
+                clock=False,
+                effect=demo_effect,
+            )
+            info = []
+            info_width = 0
+            info_height = 0
+        elif demo:
             cfg = dict(CONFIG_DEFAULTS)
             cfg.update(
                 specs=True,
@@ -1786,6 +1816,16 @@ def main() -> None:
             pidfile.write_text(f"{child}\n")
         except OSError:
             pass
+
+    if demo_effect:
+        sys.stdout.write("\x1b[?25l")
+        sys.stdout.flush()
+        try:
+            while True:
+                time.sleep(3600)
+        except KeyboardInterrupt:
+            pass
+        return
 
     exec_shell()
 

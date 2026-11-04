@@ -163,19 +163,30 @@ artifacts behind.
 
 Set `effect` in the config to choose the animation:
 
-| `effect` | Description |
-| --- | --- |
-| `pipes` | The original rounded-pipe screensaver |
-| `matrix` | Green falling glyphs |
-| `rain` | Blue falling drops |
-| `stars` | A drifting starfield |
-| `fire` | Flames rising from the bottom |
-| `bubbles` | Bubbles drifting upward |
-| `orbs` | Slow lava-lamp orbs that expand and contract |
-| `plasma` | Slow multicolour plasma waves |
-| `none` | No animation; clock and border only |
+<table>
+<tr>
+<td align="center"><b>pipes</b><br><img src="demos/pipes.gif" width="300"><br><sub>classic pipes screensaver</sub></td>
+<td align="center"><b>matrix</b><br><img src="demos/matrix.gif" width="300"><br><sub>green falling glyphs</sub></td>
+<td align="center"><b>rain</b><br><img src="demos/rain.gif" width="300"><br><sub>blue falling drops</sub></td>
+</tr>
+<tr>
+<td align="center"><b>stars</b><br><img src="demos/stars.gif" width="300"><br><sub>flickering night sky</sub></td>
+<td align="center"><b>fire</b><br><img src="demos/fire.gif" width="300"><br><sub>flames from the bottom</sub></td>
+<td align="center"><b>bubbles</b><br><img src="demos/bubbles.gif" width="300"><br><sub>bubbles drifting upward</sub></td>
+</tr>
+<tr>
+<td align="center"><b>orbs</b><br><img src="demos/orbs.gif" width="300"><br><sub>breathing lava-lamp orbs</sub></td>
+<td align="center"><b>plasma</b><br><img src="demos/plasma.gif" width="300"><br><sub>multicolour plasma waves</sub></td>
+<td align="center"><b>none</b><br><img src="demos/none.gif" width="300"><br><sub>clock and border only</sub></td>
+</tr>
+</table>
 
-The clock and border work with every effect.
+The previews above show only the effect area; the clock, border and system
+information still work with every effect. See the main demo at the top for the
+full layout.
+
+**Orbs** uses `orb_count` (2–4), `orb_speed`, `orb_min_size` /
+`orb_max_size` (radii in cells), and `orb_color` (a colour name or `multi`).
 
 ## Terminals and shells
 
@@ -284,7 +295,8 @@ default.
 - `fish/piperfetch.fish` — fish hooks
 - `shell/bash-piperfetch.sh` — bash hooks
 - `shell/zsh-piperfetch.zsh` — zsh hooks
-- `demo.gif` — animated demo
+- `demo.gif` — full-layout animated demo
+- `demos/` — one preview GIF per effect
 - `CHANGELOG.md` — release history
 - `LICENSE` — MIT
 - `README.md` — this file

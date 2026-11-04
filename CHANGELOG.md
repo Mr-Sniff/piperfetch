@@ -8,6 +8,7 @@
   twinkling instead of fast movement.
 - Tuned defaults for every effect to calmer, more usable speeds.
 - Documented how `fps` and per-effect speed settings combine.
+- Added a preview GIF for every effect under `demos/`.
 
 ## 1.0.0 — 2026-11-04
 

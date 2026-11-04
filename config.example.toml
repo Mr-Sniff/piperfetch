@@ -86,8 +86,8 @@ bubble_color = "cyan"
 # color: multi, or green/cyan/blue/purple/magenta/red/yellow/white.
 orb_count = 3
 orb_speed = 1
-orb_min_size = 3
-orb_max_size = 8
+orb_min_size = 4
+orb_max_size = 10
 orb_color = "purple"
 
 # ── Plasma (only when effect = "plasma") ──────────────────────────────
