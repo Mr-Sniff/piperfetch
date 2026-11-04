@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import getpass
 import configparser
+import copy
 import fcntl
 import json
 import math
@@ -34,7 +35,40 @@ RESET = "\x1b[0m"
 BOLD = "\x1b[1m"
 TITLE = "\x1b[1;32m"
 KEY = "\x1b[1;36m"
+VALUE = "\x1b[39m"
+SEPARATOR = "\x1b[1;32m"
 BORDER = "\x1b[1;37m"
+
+ANSI_COLORS = {
+    "black": 30, "red": 31, "green": 32, "yellow": 33,
+    "blue": 34, "magenta": 35, "cyan": 36, "white": 37,
+    "default": 39,
+    "bright_black": 90, "bright_red": 91, "bright_green": 92,
+    "bright_yellow": 93, "bright_blue": 94, "bright_magenta": 95,
+    "bright_cyan": 96, "bright_white": 97,
+}
+
+LABEL_DEFAULTS = {
+    "os": "System",
+    "kernel": "Kernel",
+    "uptime": "Uptime",
+    "packages": "Packages",
+    "shell": "Shell",
+    "display": "Display",
+    "wm": "Compositor",
+    "theme": "Theme",
+    "font": "UI Font",
+    "cursor": "Cursor",
+    "terminal": "Terminal",
+    "terminal_font": "Terminal Font",
+    "cpu": "Processor",
+    "gpu": "Graphics",
+    "memory": "Memory",
+    "swap": "Swap",
+    "disk": "Root Disk",
+    "ip": "Network",
+    "locale": "Locale",
+}
 
 ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
@@ -90,6 +124,17 @@ CONFIG_DEFAULTS = {
     "max_height": 0,
     "align": "left",
     "shell_rows": 8,
+    # spec sheet colours
+    "title_color": "green",
+    "separator_color": "green",
+    "key_color": "cyan",
+    "value_color": "default",
+    "border_color": "white",
+    "clock_color": "white",
+    "title_bold": True,
+    "key_bold": True,
+    "value_bold": False,
+    "labels": dict(LABEL_DEFAULTS),
     # animation selection and master clock
     "effect": "pipes",
     "fps": DEFAULT_FPS,
@@ -157,7 +202,7 @@ def parse_pipe_colors(value) -> tuple[int, ...]:
 
 
 def load_config(path: str | Path | None = None) -> dict:
-    cfg = dict(CONFIG_DEFAULTS)
+    cfg = copy.deepcopy(CONFIG_DEFAULTS)
     path = Path(path).expanduser() if path else config_path()
     try:
         with path.open("rb") as handle:
@@ -237,7 +282,87 @@ def load_config(path: str | Path | None = None) -> dict:
 
     if isinstance(data.get("clock_format"), str) and data["clock_format"]:
         cfg["clock_format"] = data["clock_format"]
+
+    for key in ("title_bold", "key_bold", "value_bold"):
+        if isinstance(data.get(key), bool):
+            cfg[key] = data[key]
+    for key in (
+        "title_color", "separator_color", "key_color",
+        "value_color", "border_color", "clock_color",
+    ):
+        if isinstance(data.get(key), str):
+            cfg[key] = data[key]
+    labels = data.get("labels")
+    if isinstance(labels, dict):
+        for key, value in labels.items():
+            if key in LABEL_DEFAULTS and isinstance(value, str):
+                cfg["labels"][key] = value
     return cfg
+
+
+def _kitty_conf_value(path: Path, wanted: str, seen: set[Path]) -> str:
+    path = path.expanduser()
+    if path in seen or not path.exists():
+        return ""
+    seen.add(path)
+    try:
+        lines = path.read_text(errors="replace").splitlines()
+    except OSError:
+        return ""
+    value = ""
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("include "):
+            included = path.parent / line.split(None, 1)[1].strip()
+            found = _kitty_conf_value(included, wanted, seen)
+            if found:
+                value = found
+            continue
+        parts = line.split(None, 1)
+        if len(parts) == 2 and parts[0] == wanted:
+            value = parts[1].strip()
+    return value
+
+
+def caret_color() -> str:
+    conf = Path.home() / ".config/kitty/kitty.conf"
+    value = _kitty_conf_value(conf, "cursor", set())
+    if re.fullmatch(r"#[0-9a-fA-F]{6}", value):
+        return value
+    return "#FFDF80"
+
+
+def color_code(spec: str, bold: bool = False, default: str = "default") -> str:
+    spec = (spec or default).strip()
+    if spec.lower() == "caret":
+        spec = caret_color()
+    prefix = "1;" if bold else ""
+
+    if re.fullmatch(r"#[0-9a-fA-F]{6}", spec):
+        red = int(spec[1:3], 16)
+        green = int(spec[3:5], 16)
+        blue = int(spec[5:7], 16)
+        return f"\x1b[{prefix}38;2;{red};{green};{blue}m"
+
+    code = ANSI_COLORS.get(spec.lower())
+    if code is not None:
+        return f"\x1b[{prefix}{code}m"
+    if spec.isdigit() and 0 <= int(spec) <= 255:
+        return f"\x1b[{prefix}38;5;{int(spec)}m"
+    code = ANSI_COLORS[default]
+    return f"\x1b[{prefix}{code}m"
+
+
+def apply_style(cfg: dict) -> None:
+    global TITLE, SEPARATOR, KEY, VALUE, BORDER, CLOCK_COLOR
+    TITLE = color_code(cfg["title_color"], cfg["title_bold"])
+    SEPARATOR = color_code(cfg["separator_color"], cfg["title_bold"])
+    KEY = color_code(cfg["key_color"], cfg["key_bold"])
+    VALUE = color_code(cfg["value_color"], cfg["value_bold"])
+    BORDER = color_code(cfg["border_color"], True)
+    CLOCK_COLOR = color_code(cfg["clock_color"], True)
 
 
 def terminal_geometry() -> tuple[int, int, int, int]:
@@ -286,7 +411,7 @@ def run(cmd: list[str], timeout: float = 1.0) -> str:
 def module(key: str, value: str | None) -> str | None:
     if value is None or value == "":
         return None
-    return f"{KEY}{key}{RESET}: {value}"
+    return f"{KEY}{key}{RESET}: {VALUE}{value}{RESET}"
 
 
 def human_bytes(size: float) -> str:
@@ -863,14 +988,15 @@ def color_line(base: int) -> str:
 # Information block
 # ---------------------------------------------------------------------------
 
-def build_info() -> list[str]:
+def build_info(labels: dict | None = None) -> list[str]:
+    labels = labels or LABEL_DEFAULTS
     user = getpass.getuser()
     host = socket.gethostname().split(".")[0]
     title = f"{user}@{host}"
 
     lines: list[str] = [
         f"{TITLE}{title}{RESET}",
-        f"{TITLE}{'-' * len(title)}{RESET}",
+        f"{SEPARATOR}{'-' * len(title)}{RESET}",
     ]
 
     def add(key: str, value: str | None) -> None:
@@ -878,34 +1004,34 @@ def build_info() -> list[str]:
         if line:
             lines.append(line)
 
-    add("OS", f"{os_release()} {os.uname().machine}")
-    add("Kernel", os.uname().release)
-    add("Uptime", uptime())
-    add("Packages", package_count())
-    add("Shell", shell_name())
+    add(labels["os"], f"{os_release()} {os.uname().machine}")
+    add(labels["kernel"], os.uname().release)
+    add(labels["uptime"], uptime())
+    add(labels["packages"], package_count())
+    add(labels["shell"], shell_name())
 
     for connector, mode in displays():
-        add(f"Display ({connector})", mode)
+        add(f"{labels['display']} ({connector})", mode)
 
-    add("Window Manager", window_manager())
-    add("Theme", desktop_theme())
-    add("Font", desktop_font())
-    add("Cursor", desktop_cursor())
-    add("Terminal", terminal_name())
-    add("Terminal Font", terminal_font())
-    add("CPU", cpu_info())
+    add(labels["wm"], window_manager())
+    add(labels["theme"], desktop_theme())
+    add(labels["font"], desktop_font())
+    add(labels["cursor"], desktop_cursor())
+    add(labels["terminal"], terminal_name())
+    add(labels["terminal_font"], terminal_font())
+    add(labels["cpu"], cpu_info())
 
     for index, gpu in enumerate(gpu_info(), 1):
-        add(f"GPU {index}", gpu)
+        add(f"{labels['gpu']} {index}", gpu)
 
     memory, swap = memory_info()
-    add("Memory", memory)
-    add("Swap", swap)
-    add("Disk (/)", disk_info())
+    add(labels["memory"], memory)
+    add(labels["swap"], swap)
+    add(labels["disk"], disk_info())
     ip = local_ip()
     if ip:
-        add(f"Local IP ({ip[0]})", ip[1])
-    add("Locale", os.environ.get("LANG", ""))
+        add(f"{labels['ip']} ({ip[0]})", ip[1])
+    add(labels["locale"], os.environ.get("LANG", ""))
 
     lines.append("")
     lines.append(color_line(40))
@@ -913,11 +1039,12 @@ def build_info() -> list[str]:
     return lines
 
 
-def demo_info() -> list[str]:
+def demo_info(labels: dict | None = None) -> list[str]:
+    labels = labels or LABEL_DEFAULTS
     title = "user@cachy"
     lines: list[str] = [
         f"{TITLE}{title}{RESET}",
-        f"{TITLE}{'-' * len(title)}{RESET}",
+        f"{SEPARATOR}{'-' * len(title)}{RESET}",
     ]
 
     def add(key: str, value: str) -> None:
@@ -925,22 +1052,22 @@ def demo_info() -> list[str]:
         if line:
             lines.append(line)
 
-    add("OS", "CachyOS x86_64")
-    add("Kernel", "6.18.1-cachyos")
-    add("Uptime", "2 hours, 41 mins")
-    add("Packages", "2238 (pacman), 30 (flatpak)")
-    add("Shell", "fish 4.9.3")
-    add("Display (DP-1)", "3440x1440 @ 180 Hz")
-    add("Window Manager", "niri 26.04 (Wayland)")
-    add("Theme", "Nordic-Darker-Solid [GTK3/4]")
-    add("Font", "Fira Sans (10pt) [GTK3/4]")
-    add("Terminal", "kitty 0.49.2")
-    add("CPU", "12th Gen Intel(R) Core(TM) i9-12900K (16C/24T) @ 5.20 GHz")
-    add("GPU", "NVIDIA GeForce RTX 4080 [Discrete]")
-    add("Memory", "12.4 GiB / 31.1 GiB (40%)")
-    add("Swap", "2.6 GiB / 31.1 GiB (8%)")
-    add("Disk (/)", "1.32 TiB / 1.34 TiB (98%) - btrfs")
-    add("Locale", "en_US.UTF-8")
+    add(labels["os"], "CachyOS x86_64")
+    add(labels["kernel"], "6.18.1-cachyos")
+    add(labels["uptime"], "2 hours, 41 mins")
+    add(labels["packages"], "2238 (pacman), 30 (flatpak)")
+    add(labels["shell"], "fish 4.9.3")
+    add(f"{labels['display']} (DP-1)", "3440x1440 @ 180 Hz")
+    add(labels["wm"], "niri 26.04 (Wayland)")
+    add(labels["theme"], "Nordic-Darker-Solid [GTK3/4]")
+    add(labels["font"], "Fira Sans (10pt) [GTK3/4]")
+    add(labels["terminal"], "kitty 0.49.2")
+    add(labels["cpu"], "12th Gen Intel(R) Core(TM) i9-12900K (16C/24T) @ 5.20 GHz")
+    add(f"{labels['gpu']} 1", "NVIDIA GeForce RTX 4080 [Discrete]")
+    add(labels["memory"], "12.4 GiB / 31.1 GiB (40%)")
+    add(labels["swap"], "2.6 GiB / 31.1 GiB (8%)")
+    add(labels["disk"], "1.32 TiB / 1.34 TiB (98%) - btrfs")
+    add(labels["locale"], "en_US.UTF-8")
 
     lines.append("")
     lines.append(color_line(40))
@@ -1686,15 +1813,17 @@ def main() -> None:
             print(f"{name:10} {EFFECT_DESCRIPTIONS[name]}")
         return
 
+    config_override = cli_value("--config")
+
     if "--info" in sys.argv:
-        sys.stdout.write("\n".join(build_info()) + "\n")
+        cfg = load_config(config_override)
+        apply_style(cfg)
+        sys.stdout.write("\n".join(build_info(cfg["labels"])) + "\n")
         return
 
     if "--version" in sys.argv:
-        print("piperfetch 1.1.0")
+        print("piperfetch 1.2.0")
         return
-
-    config_override = cli_value("--config")
 
     if "--check-config" in sys.argv:
         cfg = load_config(config_override)
@@ -1703,7 +1832,9 @@ def main() -> None:
         return
 
     if not sys.stdout.isatty():
-        sys.stdout.write("\n".join(build_info()) + "\n")
+        cfg = load_config(config_override)
+        apply_style(cfg)
+        sys.stdout.write("\n".join(build_info(cfg["labels"])) + "\n")
         return
 
     demo = "--demo" in sys.argv
@@ -1719,7 +1850,7 @@ def main() -> None:
         demo_clock = None
     try:
         if demo_clock:
-            cfg = dict(CONFIG_DEFAULTS)
+            cfg = copy.deepcopy(CONFIG_DEFAULTS)
             cfg.update(
                 specs=False,
                 autosize=True,
@@ -1734,7 +1865,7 @@ def main() -> None:
             info_width = 0
             info_height = 0
         elif demo_effect:
-            cfg = dict(CONFIG_DEFAULTS)
+            cfg = copy.deepcopy(CONFIG_DEFAULTS)
             cfg.update(
                 specs=False,
                 autosize=True,
@@ -1748,7 +1879,7 @@ def main() -> None:
             info_width = 0
             info_height = 0
         elif demo:
-            cfg = dict(CONFIG_DEFAULTS)
+            cfg = copy.deepcopy(CONFIG_DEFAULTS)
             cfg.update(
                 specs=True,
                 autosize=True,
@@ -1758,13 +1889,15 @@ def main() -> None:
                 clock=True,
                 clock_size=2,
             )
-            info = demo_info()
+            apply_style(cfg)
+            info = demo_info(cfg["labels"])
             info_width = max(visible_width(line) for line in info)
             info_height = len(info)
         else:
             cfg = load_config(config_override)
+            apply_style(cfg)
             if cfg["specs"]:
-                info = build_info()
+                info = build_info(cfg["labels"])
                 info_width = max(visible_width(line) for line in info)
                 info_height = len(info)
             else:

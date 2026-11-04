@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.2.0 — 2026-11-04
+
+- Added spec-sheet colour customization for title, separator, field names,
+  values, box border, and clock.
+- Colours accept ANSI names, `#RRGGBB`, 0–255 colour indices, or `caret` to
+  follow the Kitty cursor colour.
+- Added bold/weight options for title, field names, and values.
+- Added a `[labels]` config table for renaming every information field.
+- Renamed default fields to clearer names such as `System`, `Processor`,
+  `Graphics`, `Root Disk`, `Network`, and `Compositor`.
+
 ## 1.1.0 — 2026-11-04
 
 - Added the `orbs` effect: 2–4 evenly spaced, slowly breathing lava-lamp

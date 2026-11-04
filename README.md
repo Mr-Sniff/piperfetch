@@ -1,7 +1,8 @@
 # piperfetch
 
 A small, self-contained fastfetch-style terminal dashboard with live
-animations: pipes, Matrix rain, blue rain, stars, fire, bubbles, orbs, or plasma.
+animations: pipes, Matrix rain, blue rain, stars, fire, bubbles, orbs, or
+plasma. The spec sheet has customizable colours, weights, and field names.
 
 ![piperfetch demo](demo.gif)
 
@@ -171,6 +172,54 @@ cp config.example.toml ~/.config/piperfetch/config.toml
   much room is left below the box.
 - `clock` is independent of the effect; the clock is drawn above the effect.
 
+### Spec sheet styling
+
+Colours accept:
+
+- an ANSI name: `black`, `red`, `green`, `yellow`, `blue`, `magenta`,
+  `cyan`, `white`, `bright_*`, or `default`
+- a hex value: `#RRGGBB`
+- a 0–255 terminal colour index
+- `caret` — reads the Kitty cursor colour from `~/.config/kitty/kitty.conf`
+
+```toml
+title_color = "caret"       # same yellow as the cursor
+separator_color = "caret"
+key_color = "#6cbeb5"       # field names
+value_color = "#b2c8d6"     # field values
+border_color = "#ffffff"
+clock_color = "#ffffff"
+title_bold = true
+key_bold = true
+value_bold = false
+
+[labels]
+os = "System"
+kernel = "Kernel"
+uptime = "Uptime"
+packages = "Packages"
+shell = "Shell"
+display = "Display"
+wm = "Compositor"
+theme = "Theme"
+font = "UI Font"
+cursor = "Cursor"
+terminal = "Terminal"
+terminal_font = "Terminal Font"
+cpu = "Processor"
+gpu = "Graphics"
+memory = "Memory"
+swap = "Swap"
+disk = "Root Disk"
+ip = "Network"
+locale = "Locale"
+```
+
+The `[labels]` table can rename any field without touching the code. The
+defaults above are chosen to be a little more descriptive than the original
+short names (for example `System`, `Processor`, `Graphics`, `Root Disk`, and
+`Network`).
+
 ### Key reference
 
 | Key | Values | Notes |
@@ -181,6 +230,11 @@ cp config.example.toml ~/.config/piperfetch/config.toml
 | `max_width`, `max_height` | pixels (`0` = off) | Cap the box |
 | `align` | `left`, `center`, `right` | Horizontal placement |
 | `shell_rows` | rows | Space below the box when specs are off |
+| `title_color`, `separator_color` | colour | Title and rule |
+| `key_color`, `value_color` | colour | Field names and values |
+| `border_color`, `clock_color` | colour | Box border and clock |
+| `title_bold`, `key_bold`, `value_bold` | `true` / `false` | Font weights |
+| `labels` | `[labels]` table | Rename individual fields |
 | `effect` | `pipes`, `matrix`, `rain`, `stars`, `fire`, `bubbles`, `orbs`, `plasma`, `none` | Select one animation |
 | `fps` | `1–240` | Master frame rate |
 | `pipe_type` | `0–9` | Pipes glyph style |

@@ -19,7 +19,23 @@
 #   Per-effect speed values are frame divisors.  effective speed =
 #   fps / effect_speed.  For example, fps = 38 and matrix_speed = 2 means
 #   the matrix columns advance about 19 times per second.
+#
+# SPEC SHEET COLOURS
+#   Colours accept ANSI names (green, cyan, yellow, ...), #RRGGBB,
+#   a 0-255 terminal colour number, or "caret" for the Kitty cursor colour.
+#   Labels are renamed in the [labels] table at the end of this file.
 # ══════════════════════════════════════════════════════════════════════
+
+# ── Spec sheet styling ────────────────────────────────────────────────
+title_color = "green"
+separator_color = "green"
+key_color = "cyan"
+value_color = "default"
+border_color = "white"
+clock_color = "white"
+title_bold = true
+key_bold = true
+value_bold = false
 
 # ── Layout ────────────────────────────────────────────────────────────
 specs = true
@@ -101,3 +117,25 @@ clock = false
 # 1 = one-line text, 2 = 3-row half-block clock, 3 = 5-row block clock.
 clock_size = 1
 clock_format = "%H:%M:%S"
+
+# ── Spec sheet field names ────────────────────────────────────────────
+[labels]
+os = "System"
+kernel = "Kernel"
+uptime = "Uptime"
+packages = "Packages"
+shell = "Shell"
+display = "Display"
+wm = "Compositor"
+theme = "Theme"
+font = "UI Font"
+cursor = "Cursor"
+terminal = "Terminal"
+terminal_font = "Terminal Font"
+cpu = "Processor"
+gpu = "Graphics"
+memory = "Memory"
+swap = "Swap"
+disk = "Root Disk"
+ip = "Network"
+locale = "Locale"
