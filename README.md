@@ -1,7 +1,7 @@
 # piperfetch
 
-A small, self-contained fastfetch-style terminal dashboard with a live
-`pipes.sh`-inspired animation.
+A small, self-contained fastfetch-style terminal dashboard with live
+animations: classic pipes, Matrix rain, blue rain, or a starfield.
 
 ![piperfetch demo](demo.gif)
 
@@ -19,10 +19,10 @@ The dashboard sits at the top until you run a command. That means:
 - **Python 3.11+** (uses the standard-library `tomllib`; no pip packages)
 - a Linux/Unix terminal that supports `ESC 7` / `ESC 8` cursor save/restore;
   Kitty is recommended
-- **fish** for the included shell integration (the animation stop/clear hooks)
-- optional: `niri`, `lscpu`, `lspci`, `ip`, `gsettings`, `kitty`, `fish` for
-  the corresponding information lines. Missing commands simply hide their
-  module.
+- **fish, zsh, or bash** for the shell integration (fish is the most tested)
+- optional: `niri`, `hyprctl`, `swaymsg`, `wlr-randr`, `xrandr`, `lscpu`,
+  `lspci`, `ip`, `gsettings`, `kitty`, `fish` for the corresponding
+  information lines. Missing commands simply hide their module.
 
 There are **no third-party Python dependencies** and no build step.
 
@@ -53,6 +53,21 @@ If your fish greeting runs another fetch, disable it:
 function fish_greeting
 end
 ```
+
+For **zsh**, add this to `~/.zshrc`:
+
+```zsh
+source /absolute/path/to/shell/zsh-piperfetch.zsh
+```
+
+For **bash**, add this to `~/.bashrc`:
+
+```bash
+source /absolute/path/to/shell/bash-piperfetch.sh
+```
+
+The bash integration uses a `DEBUG` trap for preexec detection; merge it with
+any existing `DEBUG` trap if you already have one.
 
 Then set Kitty to use piperfetch as its shell program:
 
@@ -93,6 +108,9 @@ max_height = 700
 # "left", "center" or "right".
 align = "center"
 
+# Animation: pipes, matrix, rain, stars, none.
+effect = "pipes"
+
 # Bold clock in the middle of the box; pipes are drawn behind it.
 clock = true
 # 1 = normal text, 2 = 3-row clock, 3 = 5-row large clock.
@@ -121,12 +139,58 @@ The box, clock and information block are redrawn when the terminal is resized.
 Resizing clears the visible shell area so reflowed dashboard lines cannot leave
 artifacts behind.
 
+## Effects
+
+Set `effect` in the config to choose the animation:
+
+| `effect` | Description |
+| --- | --- |
+| `pipes` | The original rounded-pipe screensaver |
+| `matrix` | Green falling glyphs |
+| `rain` | Blue falling drops |
+| `stars` | A drifting starfield |
+| `none` | No animation; clock and border only |
+
+The clock and border work with every effect.
+
+## Terminals and shells
+
+The dashboard itself only needs a terminal with ANSI cursor movement and
+`ESC 7` / `ESC 8` support. It is tested with Kitty and should work in
+Alacritty, foot, WezTerm, Konsole, GNOME Terminal, xterm, tmux, and screen.
+Pixel-based `max_width` / `max_height` limits depend on the terminal reporting
+its pixel size; terminals that do not report it will simply ignore those caps.
+
+Shell support:
+
+- **fish** — `fish/piperfetch.fish`
+- **zsh** — `shell/zsh-piperfetch.zsh`
+- **bash** — `shell/bash-piperfetch.sh` (uses a `DEBUG` trap)
+
+The shell hooks stop the animation when a command starts so output can scroll
+the dashboard away.
+
+## Window managers
+
+The information block adapts to the desktop it can detect:
+
+- niri
+- Hyprland
+- Sway / i3
+- KDE Plasma
+- GNOME Shell
+- Xfce
+- generic Wayland (`wlr-randr`) and X11 (`xrandr`) display detection
+
+Missing tools or unsupported desktops simply omit the display/window-manager
+lines; the rest of the dashboard still works.
+
 ## Make it the Kitty default
 
 `~/.config/kitty/kitty.conf`:
 
 ```conf
-shell /home/teo/AAegna_grejer/programmering/piperfetch/piperfetch
+shell /absolute/path/to/piperfetch
 ```
 
 Kitty then starts `piperfetch` as the shell program. `piperfetch` draws the
@@ -142,6 +206,37 @@ The fish side needs the integration in `~/.config/fish/config.fish`:
   screen, so the dashboard disappears like a normal fetch logo.
 
 The hooks are included in `fish/piperfetch.fish`; see Installation above.
+
+### Other terminals
+
+Set the terminal to launch `piperfetch` instead of the shell:
+
+```conf
+# Alacritty (~/.config/alacritty/alacritty.toml)
+[terminal.shell]
+program = "/absolute/path/to/piperfetch"
+```
+
+```lua
+-- WezTerm (~/.config/wezterm/wezterm.lua)
+config.default_prog = { "/absolute/path/to/piperfetch" }
+```
+
+```ini
+# foot (~/.config/foot/foot.ini)
+[main]
+shell=/absolute/path/to/piperfetch
+```
+
+For Konsole and GNOME Terminal, use a profile's “custom command” setting.
+For xterm:
+
+```bash
+xterm -e /absolute/path/to/piperfetch
+```
+
+The program itself does not require Kitty; Kitty is only the documented
+default.
 
 ## Layout
 
@@ -163,6 +258,8 @@ The hooks are included in `fish/piperfetch.fish`; see Installation above.
 - `piperfetch` — the whole program (stdlib only)
 - `config.example.toml` — configuration example
 - `fish/piperfetch.fish` — fish hooks
+- `shell/bash-piperfetch.sh` — bash hooks
+- `shell/zsh-piperfetch.zsh` — zsh hooks
 - `demo.gif` — animated demo
 - `README.md` — this file
 

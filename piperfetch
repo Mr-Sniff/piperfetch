@@ -12,7 +12,9 @@ This file intentionally uses only the Python standard library.
 from __future__ import annotations
 
 import getpass
+import configparser
 import fcntl
+import json
 import os
 import random
 import re
@@ -49,6 +51,7 @@ CONFIG_DEFAULTS = {
     "max_width": 0,
     "max_height": 0,
     "align": "left",
+    "effect": "pipes",
     "clock": False,
     "clock_size": 1,
     "clock_format": "%H:%M:%S",
@@ -90,6 +93,10 @@ def load_config() -> dict:
         align = data["align"].lower()
         if align in ("left", "center", "right"):
             cfg["align"] = align
+    if isinstance(data.get("effect"), str):
+        effect = data["effect"].lower()
+        if effect in ("pipes", "matrix", "rain", "stars", "none"):
+            cfg["effect"] = effect
     if isinstance(data.get("clock_format"), str) and data["clock_format"]:
         cfg["clock_format"] = data["clock_format"]
     return cfg
@@ -211,6 +218,17 @@ def package_count() -> str:
         parts.append(f"{flatpak} (flatpak)")
     if pacman:
         parts.append(f"{pacman} (pacman)")
+    else:
+        for command, label in (
+            (["dpkg-query", "-f", ".\n", "-W"], "dpkg"),
+            (["rpm", "-qa"], "rpm"),
+            (["apk", "info"], "apk"),
+        ):
+            output = run(command, timeout=2.0)
+            count = len(output.splitlines())
+            if count:
+                parts.append(f"{count} ({label})")
+                break
     return ", ".join(parts)
 
 
@@ -229,33 +247,168 @@ def shell_name() -> str:
 
 
 def displays() -> list[tuple[str, str]]:
+    # Niri
     output = run(["niri", "msg", "outputs"], timeout=1.0)
-    if not output:
-        return []
+    if output:
+        result: list[tuple[str, str]] = []
+        lines = output.splitlines()
+        for index, line in enumerate(lines):
+            match = re.match(
+                r'Output\s+".*"\s+\((DP-\d+|HDMI-\d+|eDP-\d+)\)', line
+            )
+            if not match:
+                continue
+            connector = match.group(1)
+            mode = ""
+            for nxt in lines[index + 1:index + 8]:
+                found = re.search(
+                    r"Current mode:\s*(\d+x\d+)\s*@\s*([\d.]+)\s*Hz", nxt
+                )
+                if found:
+                    mode = f"{found.group(1)} @ {float(found.group(2)):.0f} Hz"
+                    break
+            result.append((connector, mode))
+        if result:
+            return result
 
-    lines = output.splitlines()
-    result: list[tuple[str, str]] = []
-    for index, line in enumerate(lines):
-        match = re.match(r'Output\s+".*"\s+\((DP-\d+|HDMI-\d+|eDP-\d+)\)', line)
-        if not match:
-            continue
-        connector = match.group(1)
-        mode = ""
-        for nxt in lines[index + 1:index + 8]:
-            found = re.search(r"Current mode:\s*(\d+x\d+)\s*@\s*([\d.]+)\s*Hz", nxt)
-            if found:
-                mode = f"{found.group(1)} @ {float(found.group(2)):.0f} Hz"
-                break
-        result.append((connector, mode))
-    return result
+    # Hyprland
+    hypr = run(["hyprctl", "monitors", "-j"], timeout=1.0)
+    if hypr:
+        try:
+            monitors = json.loads(hypr)
+            result = []
+            for monitor in monitors:
+                name = monitor.get("name", "?")
+                width = monitor.get("width")
+                height = monitor.get("height")
+                refresh = monitor.get("refreshRate", 0)
+                if width and height:
+                    result.append((
+                        name,
+                        f"{width}x{height} @ {float(refresh):.0f} Hz",
+                    ))
+            if result:
+                return result
+        except (ValueError, TypeError):
+            pass
+
+    # Sway / i3 (Wayland or X11)
+    sway = run(["swaymsg", "-t", "get_outputs", "-r"], timeout=1.0)
+    if sway:
+        try:
+            outputs = json.loads(sway)
+            result = []
+            for output in outputs:
+                current = output.get("current_mode")
+                if not current:
+                    continue
+                refresh = current.get("refresh", 0) / 1000.0
+                result.append((
+                    output.get("name", "?"),
+                    f"{current.get('width')}x{current.get('height')} "
+                    f"@ {refresh:.0f} Hz",
+                ))
+            if result:
+                return result
+        except (ValueError, TypeError):
+            pass
+
+    # wlr-randr (generic wlroots)
+    wlr = run(["wlr-randr"], timeout=1.0)
+    if wlr:
+        result = []
+        connector = ""
+        for line in wlr.splitlines():
+            top = re.match(r"^(\S+)\s", line)
+            if top:
+                connector = top.group(1)
+            mode = re.search(
+                r"Mode:\s*(\d+x\d+)\s*px,\s*([\d.]+)\s*Hz.*current",
+                line,
+            )
+            if connector and mode:
+                result.append((
+                    connector,
+                    f"{mode.group(1)} @ {float(mode.group(2)):.0f} Hz",
+                ))
+        if result:
+            return result
+
+    # xrandr (X11)
+    xrandr = run(["xrandr", "--query"], timeout=1.0)
+    if xrandr:
+        result = []
+        for line in xrandr.splitlines():
+            match = re.match(r"^(\S+)\s+connected\s+.*?(\d+x\d+)\+", line)
+            if match:
+                result.append((match.group(1), match.group(2)))
+        if result:
+            return result
+
+    return []
 
 
 def window_manager() -> str:
+    server = (
+        "Wayland" if os.environ.get("WAYLAND_DISPLAY")
+        else "X11" if os.environ.get("DISPLAY")
+        else ""
+    )
+    suffix = f" ({server})" if server else ""
+
     version = run(["niri", "msg", "version"], timeout=1.0)
     match = re.search(r"Compositor version:\s*([^\s]+)", version)
     if match:
-        return f"niri {match.group(1)} (Wayland)"
-    return ""
+        return f"niri {match.group(1)}{suffix}"
+
+    hypr = run(["hyprctl", "version", "-j"], timeout=1.0)
+    if hypr:
+        try:
+            data = json.loads(hypr)
+            tag = str(data.get("tag", "")).lstrip("v")
+            if tag:
+                return f"Hyprland {tag}{suffix}"
+        except (ValueError, TypeError):
+            pass
+        match = re.search(r"Hyprland\D*([\d.]+)", hypr, re.IGNORECASE)
+        if match:
+            return f"Hyprland {match.group(1)}{suffix}"
+
+    sway = run(["swaymsg", "-t", "get_version", "-r"], timeout=1.0)
+    if sway:
+        try:
+            data = json.loads(sway)
+            human = data.get("human_readable")
+            if human:
+                return f"sway {human}{suffix}"
+        except (ValueError, TypeError):
+            pass
+        match = re.search(r"sway\s+([\d.]+)", sway, re.IGNORECASE)
+        if match:
+            return f"sway {match.group(1)}{suffix}"
+
+    i3 = run(["i3", "--version"], timeout=1.0)
+    match = re.search(r"i3 version\s+([\d.]+)", i3)
+    if match:
+        return f"i3 {match.group(1)}{suffix}"
+
+    plasma = run(["plasmashell", "--version"], timeout=1.0)
+    match = re.search(r"Plasma(?:shell)?\s+([\d.]+)", plasma, re.IGNORECASE)
+    if match:
+        return f"KDE Plasma {match.group(1)}{suffix}"
+
+    gnome = run(["gnome-shell", "--version"], timeout=1.0)
+    match = re.search(r"GNOME Shell\s+([\d.]+)", gnome, re.IGNORECASE)
+    if match:
+        return f"GNOME Shell {match.group(1)}{suffix}"
+
+    xfce = run(["xfwm4", "--version"], timeout=1.0)
+    match = re.search(r"xfwm4\s+([\d.]+)", xfce, re.IGNORECASE)
+    if match:
+        return f"Xfce {match.group(1)}{suffix}"
+
+    desktop = os.environ.get("XDG_CURRENT_DESKTOP") or os.environ.get("DESKTOP_SESSION")
+    return f"{desktop}{suffix}" if desktop else ""
 
 
 def gsettings(schema: str, key: str) -> str:
@@ -263,61 +416,159 @@ def gsettings(schema: str, key: str) -> str:
     return value.strip().strip("'")
 
 
+def kde_config() -> configparser.RawConfigParser:
+    parser = configparser.RawConfigParser()
+    path = Path.home() / ".config/kdeglobals"
+    try:
+        parser.read(path)
+    except (OSError, configparser.Error):
+        pass
+    return parser
+
+
 def desktop_theme() -> str:
     theme = gsettings("org.gnome.desktop.interface", "gtk-theme")
-    return f"{theme} [GTK3/4]" if theme else ""
+    if theme:
+        return f"{theme} [GTK3/4]"
+    kde = kde_config()
+    theme = kde.get("General", "ColorScheme", fallback="")
+    if theme:
+        return f"{theme} [Qt]"
+    return os.environ.get("QT_STYLE_OVERRIDE", "")
 
 
 def desktop_font() -> str:
     value = gsettings("org.gnome.desktop.interface", "font-name")
-    if not value:
-        return ""
-    parts = value.rsplit(" ", 1)
-    if len(parts) == 2 and re.match(r"[\d.]+$", parts[1]):
-        return f"{parts[0]} ({parts[1]}pt) [GTK3/4]"
-    return f"{value} [GTK3/4]"
+    if value:
+        parts = value.rsplit(" ", 1)
+        if len(parts) == 2 and re.match(r"[\d.]+$", parts[1]):
+            return f"{parts[0]} ({parts[1]}pt) [GTK3/4]"
+        return f"{value} [GTK3/4]"
+
+    kde = kde_config()
+    value = kde.get("General", "font", fallback="")
+    if value:
+        parts = [part.strip() for part in value.split(",")]
+        if len(parts) >= 2 and re.match(r"[\d.]+$", parts[1]):
+            return f"{parts[0]} ({parts[1]}pt) [Qt]"
+    return ""
 
 
 def desktop_cursor() -> str:
     theme = gsettings("org.gnome.desktop.interface", "cursor-theme")
     size = gsettings("org.gnome.desktop.interface", "cursor-size")
-    if not theme:
-        return ""
-    return f"{theme} ({size}px)" if size else theme
+    if theme:
+        return f"{theme} ({size}px)" if size else theme
+
+    kde = kde_config()
+    theme = kde.get("General", "cursorTheme", fallback="")
+    size = kde.get("General", "cursorSize", fallback="")
+    if theme:
+        return f"{theme} ({size}px)" if size else theme
+    return ""
 
 
 def terminal_name() -> str:
-    if os.environ.get("KITTY_WINDOW_ID") or "kitty" in os.environ.get("TERM", ""):
+    env = os.environ
+    term = env.get("TERM", "")
+
+    if env.get("TMUX"):
+        version = run(["tmux", "-V"], timeout=0.5).splitlines()
+        return version[0].strip() if version else "tmux"
+    if env.get("STY"):
+        version = run(["screen", "--version"], timeout=0.5).splitlines()
+        return version[0].strip() if version else "screen"
+
+    if env.get("KITTY_WINDOW_ID") or term == "xterm-kitty":
         version = run(["kitty", "--version"], timeout=0.5).splitlines()
-        if version:
-            return " ".join(version[0].split()[:2])
-        return "kitty"
-    return os.environ.get("TERM", "")
+        return " ".join(version[0].split()[:2]) if version else "kitty"
+    if env.get("ALACRITTY_WINDOW_ID") or term == "alacritty":
+        version = run(["alacritty", "--version"], timeout=0.5).splitlines()
+        return " ".join(version[0].split()[:2]) if version else "alacritty"
+    if env.get("WEZTERM_EXECUTABLE") or term.startswith("wezterm"):
+        version = run(["wezterm", "--version"], timeout=0.5).splitlines()
+        return " ".join(version[0].split()[:2]) if version else "wezterm"
+    if env.get("KONSOLE_VERSION"):
+        version = run(["konsole", "--version"], timeout=0.5).splitlines()
+        return " ".join(version[0].split()[:2]) if version else "konsole"
+    if env.get("GNOME_TERMINAL_SCREEN"):
+        version = run(["gnome-terminal", "--version"], timeout=0.5).splitlines()
+        return " ".join(version[0].split()[:2]) if version else "gnome-terminal"
+    if env.get("TERM_PROGRAM"):
+        program = env["TERM_PROGRAM"]
+        version = env.get("TERM_PROGRAM_VERSION", "")
+        return f"{program} {version}".strip()
+
+    return term or "unknown"
 
 
 def terminal_font() -> str:
-    conf = Path.home() / ".config/kitty/kitty.conf"
-    if not conf.exists():
-        return ""
-    family = ""
-    size = ""
-    try:
-        for line in conf.read_text(errors="replace").splitlines():
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            parts = line.split(None, 1)
-            if len(parts) != 2:
-                continue
-            if parts[0] == "font_family":
-                family = parts[1].strip()
-            elif parts[0] == "font_size":
-                size = parts[1].strip()
-    except OSError:
-        return ""
-    if not family:
-        return ""
-    return f"{family} ({size}pt)" if size else family
+    env = os.environ
+    term = env.get("TERM", "")
+
+    if env.get("KITTY_WINDOW_ID") or term == "xterm-kitty":
+        conf = Path.home() / ".config/kitty/kitty.conf"
+        if not conf.exists():
+            return ""
+        family = ""
+        size = ""
+        try:
+            for line in conf.read_text(errors="replace").splitlines():
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                parts = line.split(None, 1)
+                if len(parts) != 2:
+                    continue
+                if parts[0] == "font_family":
+                    family = parts[1].strip()
+                elif parts[0] == "font_size":
+                    size = parts[1].strip()
+        except OSError:
+            return ""
+        return f"{family} ({size}pt)" if family and size else family
+
+    if env.get("ALACRITTY_WINDOW_ID") or term == "alacritty":
+        conf = Path.home() / ".config/alacritty/alacritty.toml"
+        try:
+            data = tomllib.loads(conf.read_text(errors="replace"))
+        except (OSError, tomllib.TOMLDecodeError):
+            return ""
+        font = data.get("font", {})
+        family = font.get("normal", {}).get("family", "")
+        size = font.get("size", "")
+        if family and size:
+            return f"{family} ({size}pt)"
+        return family or ""
+
+    if term.startswith("foot"):
+        conf = Path.home() / ".config/foot/foot.ini"
+        parser = configparser.RawConfigParser()
+        try:
+            parser.read(conf)
+        except (OSError, configparser.Error):
+            return ""
+        value = parser.get("main", "font", fallback="")
+        match = re.match(r"([^:]+)(?::[^:]*)?:size=([\d.]+)", value)
+        if match:
+            return f"{match.group(1)} ({match.group(2)}pt)"
+        return value.split(":")[0] if value else ""
+
+    if env.get("WEZTERM_EXECUTABLE") or term.startswith("wezterm"):
+        conf = Path.home() / ".config/wezterm/wezterm.lua"
+        try:
+            text = conf.read_text(errors="replace")
+        except OSError:
+            return ""
+        family = re.search(r'family\s*=\s*"([^"]+)"', text)
+        size = re.search(r"font_size\s*=\s*([\d.]+)", text)
+        if family:
+            return (
+                f"{family.group(1)} ({size.group(1)}pt)"
+                if size else family.group(1)
+            )
+
+    return ""
 
 
 def cpu_info() -> str:
@@ -587,6 +838,106 @@ def advance(pipe: tuple[int, int, int, int], width: int, height: int):
     return (x, y, n, color), glyph
 
 
+class PipesEffect:
+    def __init__(self, width: int, height: int):
+        self.width = width
+        self.height = height
+        self.pipe = (width // 2, height // 2, 0, random.choice(PIPE_COLORS))
+
+    def step(self):
+        self.pipe, glyph = advance(self.pipe, self.width, self.height)
+        x, y, _, color = self.pipe
+        return [(x, y, glyph, f"\x1b[1;3{color}m")]
+
+
+class ColumnRainEffect:
+    """Matrix-style falling columns, also used for the blue rain effect."""
+
+    def __init__(self, width: int, height: int, chars: str, head: str, tail: str):
+        self.width = width
+        self.height = height
+        self.chars = chars
+        self.head = head
+        self.tail = tail
+        self.columns = []
+        for _ in range(width):
+            self.columns.append({
+                "y": random.randint(-height, height),
+                "speed": random.choice((1, 1, 2)),
+                "trail": random.randint(5, 15),
+                "tick": 0,
+            })
+
+    def step(self):
+        out = []
+        for x, column in enumerate(self.columns):
+            column["tick"] += 1
+            if column["tick"] % column["speed"]:
+                continue
+
+            old_y = column["y"]
+            column["y"] += 1
+            y = column["y"]
+
+            if 0 <= y < self.height:
+                out.append((x, y, random.choice(self.chars), self.head))
+            if 0 <= old_y < self.height:
+                out.append((x, old_y, random.choice(self.chars), self.tail))
+
+            tail_y = y - column["trail"]
+            if 0 <= tail_y < self.height:
+                out.append((x, tail_y, " ", self.tail))
+
+            if tail_y >= self.height:
+                column["y"] = random.randint(-self.height, 0)
+                column["speed"] = random.choice((1, 1, 2))
+                column["trail"] = random.randint(5, 15)
+        return out
+
+
+class StarsEffect:
+    def __init__(self, width: int, height: int):
+        self.width = width
+        self.height = height
+        self.stars = []
+        colors = ("\x1b[1;37m", "\x1b[1;36m", "\x1b[34m")
+        for _ in range(max(10, width * height // 60)):
+            self.stars.append({
+                "x": random.randrange(width),
+                "y": random.randrange(height),
+                "char": random.choice(("*", "+", ".", "·")),
+                "color": random.choice(colors),
+            })
+
+    def step(self):
+        out = []
+        for star in self.stars:
+            old_x, old_y = star["x"], star["y"]
+            out.append((old_x, old_y, " ", star["color"]))
+            star["x"] = (star["x"] - 1) % self.width
+            star["y"] = (star["y"] + random.choice((0, 0, 1))) % self.height
+            out.append((star["x"], star["y"], star["char"], star["color"]))
+        return out
+
+
+MATRIX_CHARS = "ｱｲｳｴｵｶｷｸｹｺｻｼｽｾｿﾀﾁﾂﾃﾄﾅﾆﾇﾈﾉ0123456789"
+RAIN_CHARS = "|/\\."
+
+
+def make_effect(name: str, width: int, height: int):
+    if name == "matrix":
+        return ColumnRainEffect(width, height, MATRIX_CHARS,
+                                "\x1b[1;92m", "\x1b[32m")
+    if name == "rain":
+        return ColumnRainEffect(width, height, RAIN_CHARS,
+                                "\x1b[1;96m", "\x1b[36m")
+    if name == "stars":
+        return StarsEffect(width, height)
+    if name == "none":
+        return None
+    return PipesEffect(width, height)
+
+
 FONT_5X5 = {
     "0": ("#####", "#   #", "#   #", "#   #", "#####"),
     "1": ("  #  ", " ##  ", "  #  ", "  #  ", " ### "),
@@ -703,8 +1054,7 @@ def animate(
     if width <= 2 or height <= 2:
         return
 
-    pipe = (width // 2, height // 2, 0, random.choice(PIPE_COLORS))
-    grid: list[list[tuple[str, int] | None]] = [[None] * width for _ in range(height)]
+    effect = make_effect(cfg["effect"], width, height)
     clock = clock_position(cfg, box_w, box_h)
     draw_clock(clock, box_x)
     resize_flag = False
@@ -767,8 +1117,7 @@ def animate(
                     box_w, box_h, box_x = new_layout
                     width = box_w - 2
                     height = box_h - 2
-                    grid = [[None] * width for _ in range(height)]
-                    pipe = (width // 2, height // 2, 0, random.choice(PIPE_COLORS))
+                    effect = make_effect(cfg["effect"], width, height)
                     # A size change makes the terminal reflow the old layout.
                     # Clear and redraw everything once, then ask fish to
                     # repaint its prompt at the new cursor position.
@@ -787,22 +1136,27 @@ def animate(
                     clock = new_clock
                     draw_clock(clock, box_x)
 
-            pipe, glyph = advance(pipe, width, height)
-            x, y, _, color = pipe
-            under_clock = (
-                clock is not None
-                and clock[1] <= y < clock[1] + clock[3]
-                and clock[0] <= x < clock[0] + clock[2]
-            )
-            if not under_clock:
-                grid[y][x] = None if glyph == " " else (glyph, color)
-                # Save/restore the cursor around every draw so fish's line
-                # editor keeps its position.
-                seq = f"\x1b7\x1b[{y + 2};{box_x + x + 1}H\x1b[1;3{color}m{glyph}\x1b8"
-                try:
-                    os.write(1, seq.encode())
-                except OSError:
-                    break
+            draws = effect.step() if effect is not None else []
+            if draws:
+                seq = ["\x1b7"]
+                for x, y, glyph, color in draws:
+                    if not (0 <= x < width and 0 <= y < height):
+                        continue
+                    if (
+                        clock is not None
+                        and clock[1] <= y < clock[1] + clock[3]
+                        and clock[0] <= x < clock[0] + clock[2]
+                    ):
+                        continue
+                    seq.append(
+                        f"\x1b[{y + 2};{box_x + x + 1}H{color}{glyph}"
+                    )
+                if len(seq) > 1:
+                    seq.append(f"{RESET}\x1b8")
+                    try:
+                        os.write(1, "".join(seq).encode())
+                    except OSError:
+                        break
             time.sleep(frame_time)
             frame += 1
     finally:

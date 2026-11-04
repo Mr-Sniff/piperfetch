@@ -17,6 +17,9 @@ max_height = 0
 # "left", "center" or "right".
 align = "left"
 
+# Animation: pipes, matrix, rain, stars, none.
+effect = "pipes"
+
 # Bold clock in the middle of the box; pipes are drawn behind it.
 clock = false
 # 1 = normal text, 2 = 3-row clock, 3 = 5-row large clock.
